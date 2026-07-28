@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "investement-agents"
+version = "0.1.0"
+description = "Auditable, research-first building blocks for investment agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Private project"}
+
+[project.optional-dependencies]
+data = [
+  "edgartools>=5.43",
+  "pandas>=1.5",
+  "yfinance>=1.5.1",
+]
+portfolio = [
+  "numpy>=1.23",
+  "pandas>=1.5",
+  "PyPortfolioOpt>=1.6.0",
+  "riskfolio-lib>=7.3.0",
+]
+analytics = [
+  "numpy>=1.23",
+  "pandas>=1.5",
+  "quantstats>=0.0.81",
+  "vectorbt>=1.1.0",
+]
+schwab = ["schwab-py>=1.5.1"]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

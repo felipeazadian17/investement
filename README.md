@@ -200,6 +200,80 @@ La ejecucion automatica de trades solo debe habilitarse cuando existan:
 - Pruebas en simulacion.
 - Mecanismos de cancelacion y monitoreo.
 
+## Implementacion Actual
+
+La primera base ejecutable de los puntos 1 a 6 ya esta disponible:
+
+| Componente | Implementacion |
+| --- | --- |
+| Datos | proveedores normalizados, cache JSON atomico y provenance |
+| Valuacion | DCF, sensibilidad, comparables robustos y margen de seguridad |
+| Portfolio | restricciones propias y backends PyPortfolioOpt/Riskfolio |
+| Backtesting | motor causal con delay, costos, metricas, QuantStats y vectorbt |
+| Agentes | workflow, comite con disenso/veto, memoria y auditoria con hash chain |
+| Schwab | fachada OAuth estrictamente read-only, sin metodos de ordenes |
+
+## Agentes Implementados
+
+Cada rol del diseño inicial tiene ahora una clase concreta en
+`src/investement/agents/`:
+
+| Agente | Clase | Salida principal |
+| --- | --- | --- |
+| Perfil del inversor | `InvestorProfileAgent` | perfil normalizado y restricciones |
+| Datos | `DataAgent` | snapshot point-in-time con evidencia |
+| Fundamental | `FundamentalAgent` | DCF, calidad y hallazgo estructurado |
+| Tecnico | `TechnicalAgent` | tendencia, momentum, RSI, MACD y riesgo observado |
+| Valuacion relativa | `RelativeValuationAgent` | fair value combinado y margen de seguridad |
+| Construccion de portfolio | `PortfolioConstructionAgent` | pesos objetivo y rebalanceos |
+| Riesgo | `RiskAgent` | hard limits, explicaciones y veto |
+| Ejecutor Schwab | `SchwabExecutorAgent` | cuentas y posiciones read-only |
+| Auditor | `AuditorAgent` | memoria y log con hash chain y secretos redactados |
+
+`InvestmentAgentPipeline` conecta los agentes de analisis con el comite, aplica
+el veto de riesgo, construye el portfolio y registra cada corrida. El pipeline
+no contiene una ruta para crear, reemplazar o cancelar ordenes.
+
+La investigacion y shortlist estan en
+[`investigacion/README.md`](investigacion/README.md). Las skills descargadas,
+su procedencia y las decisiones que aportaron estan en
+[`skills/README.md`](skills/README.md).
+
+## Inicio Rapido
+
+El stack completo usa Python 3.11 o superior. En macOS:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e '.[data,portfolio,analytics,schwab,dev]'
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/investement-mpl .venv/bin/python -m pytest -q
+.venv/bin/ruff check src tests
+```
+
+El nucleo determinista no necesita los extras:
+
+```bash
+.venv/bin/python -m pip install -e .
+.venv/bin/python examples/research_pipeline.py
+.venv/bin/python examples/agent_pipeline.py
+```
+
+## Integraciones
+
+- Yahoo: `YFinanceProvider` fija `auto_adjust=False` y conserva precio ajustado
+  y sin ajustar por separado.
+- SEC: `EdgarProvider` exige una identidad con email. Se pueden indicar
+  `data_directory` y `cache_directory` fuera del repositorio.
+- Optimizacion: los pesos de PyPortfolioOpt y Riskfolio siempre pasan por las
+  restricciones deterministas locales.
+- Analitica: QuantStats y vectorbt son opcionales. vectorbt 1.1.0 usa
+  Apache-2.0 con Commons Clause y requiere revision antes de uso comercial.
+- Schwab: el token OAuth debe guardarse fuera del proyecto. La fachada actual
+  permite cuentas, posiciones, transacciones, cotizaciones e historicos, pero
+  no expone crear, reemplazar ni cancelar ordenes.
+
 ## Estado Actual
 
-Proyecto en fase inicial de definicion.
+Base v0.1 implementada y probada con datos sinteticos. El proveedor de Yahoo se
+valido tambien con una consulta real de SPY. SEC no se consulta sin una identidad
+de contacto valida y Schwab no inicia OAuth sin credenciales del usuario.
