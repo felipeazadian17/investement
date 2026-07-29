@@ -41,7 +41,7 @@ procedencia; sus scripts de ejemplo no se importan desde el paquete local.
   validar concentracion y capital invertido.
 - Todo backtest aplica al menos un bar de delay y costos configurables.
 - El workflow registra inicios, resultados y fallas en un log encadenado.
-- Schwab queda limitado por capacidades: la fachada solo ofrece consultas.
+- SnapTrade queda limitado por capacidades: la fachada solo ofrece consultas.
 
 ## Skills descartadas
 
@@ -57,4 +57,3 @@ procedencia; sus scripts de ejemplo no se importan desde el paquete local.
 No actualizar estas carpetas a ciegas. Antes de reemplazar una skill hay que
 revisar el diff, la licencia, nuevas herramientas permitidas y cambios de
 supuestos financieros o de seguridad.
-

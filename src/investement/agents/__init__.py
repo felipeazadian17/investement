@@ -8,10 +8,15 @@ from .models import (
     AssetDataSnapshot,
     AuditReceipt,
     BrokerAccountSnapshot,
+    BrokerAwarePortfolioRecommendation,
+    BrokerPortfolioState,
     FundamentalAnalysis,
     FundamentalModelInputs,
+    IncomeStability,
+    InvestmentExperience,
     InvestorProfile,
     InvestorProfileRequest,
+    LeveragePolicy,
     PortfolioConstructionInputs,
     PortfolioPlan,
     PortfolioRecommendation,
@@ -19,7 +24,9 @@ from .models import (
     RelativeValuationAnalysis,
     RelativeValuationInputs,
     RiskAssessment,
+    RiskProfileAssessment,
     RiskTolerance,
+    TaxPolicy,
     TechnicalAnalysis,
 )
 from .pipeline import InvestmentAgentPipeline
@@ -27,7 +34,7 @@ from .portfolio import PortfolioConstructionAgent
 from .profile import InvestorProfileAgent
 from .relative_valuation import RelativeValuationAgent
 from .risk import RiskAgent
-from .schwab import SchwabExecutorAgent
+from .snaptrade import SnapTradeBrokerAgent
 from .technical import TechnicalAgent
 
 __all__ = [
@@ -38,14 +45,19 @@ __all__ = [
     "AuditReceipt",
     "AuditorAgent",
     "BrokerAccountSnapshot",
+    "BrokerAwarePortfolioRecommendation",
+    "BrokerPortfolioState",
     "DataAgent",
     "FundamentalAgent",
     "FundamentalAnalysis",
     "FundamentalModelInputs",
+    "IncomeStability",
     "InvestmentAgentPipeline",
+    "InvestmentExperience",
     "InvestorProfile",
     "InvestorProfileAgent",
     "InvestorProfileRequest",
+    "LeveragePolicy",
     "PortfolioConstructionAgent",
     "PortfolioConstructionInputs",
     "PortfolioPlan",
@@ -56,8 +68,10 @@ __all__ = [
     "RelativeValuationInputs",
     "RiskAgent",
     "RiskAssessment",
+    "RiskProfileAssessment",
     "RiskTolerance",
-    "SchwabExecutorAgent",
+    "SnapTradeBrokerAgent",
+    "TaxPolicy",
     "TechnicalAgent",
     "TechnicalAnalysis",
 ]

@@ -3,6 +3,7 @@ from statistics import mean
 
 from investement.agents.models import (
     AssetDataSnapshot,
+    BrokerPortfolioState,
     InvestorProfile,
     PortfolioPlan,
     RiskAssessment,
@@ -31,7 +32,7 @@ class RiskAgent:
             breaches.append("proposed position exceeds the maximum position weight")
         if technical.annual_volatility > profile.max_annual_volatility:
             breaches.append("asset volatility exceeds the investor profile limit")
-        if technical.max_drawdown > profile.max_drawdown:
+        if technical.max_drawdown > profile.max_asset_drawdown:
             breaches.append("observed drawdown exceeds the investor profile limit")
         if average_daily_dollar_volume < profile.minimum_daily_dollar_volume:
             breaches.append("average daily dollar volume is below the liquidity floor")
@@ -59,7 +60,7 @@ class RiskAgent:
         maximum_weight = max(plan.allocation.weights.values(), default=0.0)
         if maximum_weight > profile.max_position_weight + 1e-10:
             breaches.append("portfolio contains a position above the profile maximum")
-        if plan.allocation.annual_volatility > profile.max_annual_volatility:
+        if plan.allocation.annual_volatility > profile.max_portfolio_annual_volatility:
             breaches.append("portfolio volatility exceeds the investor profile limit")
         if abs(sum(plan.allocation.weights.values()) + plan.allocation.cash_weight - 1) > 1e-7:
             breaches.append("portfolio weights and cash do not sum to one")
@@ -82,6 +83,52 @@ class RiskAgent:
             metrics=metrics,
             evidence=evidence,
             observed_at=as_of,
+        )
+
+    def assess_current_portfolio(
+        self,
+        profile: InvestorProfile,
+        state: BrokerPortfolioState,
+    ) -> RiskAssessment:
+        breaches = []
+        maximum_weight = max(state.current_weights.values(), default=0.0)
+        concentrated = sorted(
+            symbol
+            for symbol, weight in state.current_weights.items()
+            if weight > profile.max_position_weight + 1e-10
+        )
+        if concentrated:
+            breaches.append(
+                "current positions exceed the profile maximum: " + ", ".join(concentrated)
+            )
+        prohibited = sorted(set(state.current_weights) & profile.prohibited_symbols)
+        if prohibited:
+            breaches.append("current portfolio contains prohibited symbols: " + ", ".join(prohibited))
+        if state.cash_weight + 1e-10 < profile.min_cash_weight:
+            breaches.append("current cash is below the investor profile minimum")
+        if sum(state.current_weights.values()) + state.cash_weight > 1 + 1e-7:
+            breaches.append("current positions and cash exceed total portfolio value")
+        metrics = {
+            "total_value": state.total_value,
+            "invested_weight": sum(state.current_weights.values()),
+            "maximum_position_weight": maximum_weight,
+            "cash_weight": state.cash_weight,
+        }
+        evidence = (
+            EvidenceReference(
+                source="broker-portfolio",
+                reference=(
+                    f"broker://{state.provider}/snapshot/{state.retrieved_at.isoformat()}"
+                ),
+                observed_at=state.retrieved_at,
+            ),
+        )
+        return _assessment(
+            subject="current-portfolio",
+            breaches=breaches,
+            metrics=metrics,
+            evidence=evidence,
+            observed_at=state.retrieved_at,
         )
 
 

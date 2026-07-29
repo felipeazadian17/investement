@@ -1,12 +1,13 @@
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
+from math import isnan
 from pathlib import Path
 from typing import Any
 
 from investement.data.normalize import normalize_symbol
-from investement.domain import DataProvenance
+from investement.domain import DataProvenance, FundamentalSnapshot
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,7 @@ class FilingRecord:
     symbol: str
     form: str
     filing_date: date
+    accepted_at: datetime
     accession_number: str | None
     primary_document: str | None
     provenance: DataProvenance
@@ -65,6 +67,7 @@ class EdgarProvider:
         forms: Sequence[str] = ("10-K", "10-Q", "8-K"),
         limit: int = 10,
         filed_after: date | None = None,
+        available_before: datetime | None = None,
     ) -> Sequence[FilingRecord]:
         if limit <= 0:
             raise ValueError("limit must be positive")
@@ -79,15 +82,16 @@ class EdgarProvider:
         company = company_factory(normalized)
         filings = company.get_filings(
             form=list(cleaned_forms),
-            filing_date=(filed_after.isoformat() + ":") if filed_after else None,
+            filing_date=_filing_date_range(filed_after, available_before),
             amendments=False,
         )
-        selected = filings.head(limit) if hasattr(filings, "head") else list(filings)[:limit]
         retrieved_at = self._clock()
         records = []
-        for filing in selected:
+        for filing in filings:
             filing_date = _as_date(filing.filing_date)
-            available_at = datetime.combine(filing_date, time.min, tzinfo=UTC)
+            accepted_at = _accepted_at(filing)
+            if available_before is not None and accepted_at > available_before:
+                continue
             accession = getattr(filing, "accession_number", None)
             primary_document = getattr(filing, "primary_document", None)
             records.append(
@@ -95,6 +99,7 @@ class EdgarProvider:
                     symbol=normalized,
                     form=str(filing.form),
                     filing_date=filing_date,
+                    accepted_at=accepted_at,
                     accession_number=str(accession) if accession is not None else None,
                     primary_document=(
                         str(primary_document) if primary_document is not None else None
@@ -102,12 +107,14 @@ class EdgarProvider:
                     provenance=DataProvenance(
                         source=self.name,
                         retrieved_at=retrieved_at,
-                        available_at=min(available_at, retrieved_at),
+                        available_at=accepted_at,
                         raw_reference=_filing_url(filing),
                         metadata={"company_cik": getattr(company, "cik", None)},
                     ),
                 )
             )
+            if len(records) == limit:
+                break
         return records
 
     def filing_text(self, symbol: str, form: str = "10-K") -> str:
@@ -121,6 +128,50 @@ class EdgarProvider:
         )
         return str(filing.text())
 
+    def latest_fundamentals(
+        self,
+        symbol: str,
+        forms: Sequence[str] = ("10-K", "10-Q"),
+        limit: int = 4,
+        filed_after: date | None = None,
+        available_before: datetime | None = None,
+    ) -> Sequence[FundamentalSnapshot]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        cleaned_forms = tuple(
+            form.strip().upper() for form in forms if form.strip().upper() in ("10-K", "10-Q")
+        )
+        if not cleaned_forms:
+            raise ValueError("XBRL fundamentals require at least one 10-K or 10-Q form")
+
+        company_factory, identity_setter = self._bindings()
+        if identity_setter is not None:
+            identity_setter(self._identity)
+        normalized = normalize_symbol(symbol)
+        company = company_factory(normalized)
+        filings = company.get_filings(
+            form=list(cleaned_forms),
+            filing_date=_filing_date_range(filed_after, available_before),
+            amendments=False,
+        )
+        retrieved_at = self._clock()
+        snapshots = []
+        for filing in filings:
+            accepted_at = _accepted_at(filing)
+            if available_before is not None and accepted_at > available_before:
+                continue
+            snapshots.append(
+                _extract_fundamental_snapshot(
+                    normalized,
+                    filing,
+                    retrieved_at,
+                    company_cik=getattr(company, "cik", None),
+                )
+            )
+            if len(snapshots) == limit:
+                break
+        return snapshots
+
 
 def _as_date(value: Any) -> date:
     if isinstance(value, datetime):
@@ -130,9 +181,259 @@ def _as_date(value: Any) -> date:
     return date.fromisoformat(str(value)[:10])
 
 
+def _accepted_at(filing: Any) -> datetime:
+    value = getattr(filing, "acceptance_datetime", None)
+    if value is None:
+        raise ValueError("SEC filing is missing acceptance_datetime")
+    if not isinstance(value, datetime):
+        value = datetime.fromisoformat(str(value))
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _filing_date_range(
+    filed_after: date | None,
+    available_before: datetime | None,
+) -> str | None:
+    if filed_after is None and available_before is None:
+        return None
+    start = filed_after.isoformat() if filed_after is not None else ""
+    end = available_before.date().isoformat() if available_before is not None else ""
+    return f"{start}:{end}"
+
+
 def _filing_url(filing: Any) -> str | None:
     for name in ("homepage_url", "filing_url"):
         value = getattr(filing, name, None)
         if value:
             return str(value)
     return None
+
+
+_CONCEPTS = {
+    "revenue": (
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+        "Revenues",
+    ),
+    "ebit": ("OperatingIncomeLoss",),
+    "operating_cash_flow": (
+        "NetCashProvidedByUsedInOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ),
+    "capital_expenditure": (
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+    ),
+    "cash_and_equivalents": (
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    ),
+    "debt_current": (
+        "LongTermDebtCurrent",
+        "LongTermDebtAndFinanceLeaseObligationsCurrent",
+        "ShortTermBorrowings",
+    ),
+    "debt_noncurrent": (
+        "LongTermDebtNoncurrent",
+        "LongTermDebtAndFinanceLeaseObligationsNoncurrent",
+    ),
+    "debt_total": (
+        "LongTermDebtAndFinanceLeaseObligations",
+        "LongTermDebt",
+    ),
+    "diluted_shares": ("WeightedAverageNumberOfDilutedSharesOutstanding",),
+}
+
+
+def _extract_fundamental_snapshot(
+    symbol: str,
+    filing: Any,
+    retrieved_at: datetime,
+    company_cik: Any = None,
+) -> FundamentalSnapshot:
+    accepted_at = _accepted_at(filing)
+    report_end = _as_date(
+        getattr(filing, "period_of_report", None) or filing.filing_date
+    )
+    form = str(filing.form).upper()
+    period_basis = "fiscal-ytd" if form == "10-Q" else "fiscal-year"
+    xbrl = filing.xbrl()
+    income = xbrl.statements.income_statement().to_dataframe()
+    balance = xbrl.statements.balance_sheet().to_dataframe()
+    cash_flow = xbrl.statements.cash_flow_statement().to_dataframe()
+
+    duration_column = _statement_period_column(income, report_end, period_basis)
+    cash_flow_column = _statement_period_column(cash_flow, report_end, period_basis)
+    instant_column = _statement_period_column(balance, report_end, "instant")
+    selected = {}
+
+    revenue, selected["revenue"] = _statement_value(
+        income, _CONCEPTS["revenue"], duration_column
+    )
+    ebit, selected["ebit"] = _statement_value(income, _CONCEPTS["ebit"], duration_column)
+    operating_cash_flow, selected["operating_cash_flow"] = _statement_value(
+        cash_flow, _CONCEPTS["operating_cash_flow"], cash_flow_column
+    )
+    capital_expenditure, selected["capital_expenditure"] = _statement_value(
+        cash_flow, _CONCEPTS["capital_expenditure"], cash_flow_column
+    )
+    cash, selected["cash_and_equivalents"] = _statement_value(
+        balance, _CONCEPTS["cash_and_equivalents"], instant_column
+    )
+    current_debt, current_concept = _statement_value(
+        balance, _CONCEPTS["debt_current"], instant_column
+    )
+    noncurrent_debt, noncurrent_concept = _statement_value(
+        balance, _CONCEPTS["debt_noncurrent"], instant_column
+    )
+    if current_debt is not None or noncurrent_debt is not None:
+        total_debt = (current_debt or 0.0) + (noncurrent_debt or 0.0)
+        selected["total_debt"] = "+".join(
+            concept for concept in (current_concept, noncurrent_concept) if concept
+        )
+    else:
+        total_debt, selected["total_debt"] = _statement_value(
+            balance, _CONCEPTS["debt_total"], instant_column
+        )
+    diluted_shares, selected["diluted_shares"] = _statement_value(
+        income, _CONCEPTS["diluted_shares"], duration_column
+    )
+
+    period_start = _column_period_start(xbrl, duration_column, report_end)
+    accession = getattr(filing, "accession_number", None)
+    return FundamentalSnapshot(
+        symbol=symbol,
+        period_end=report_end,
+        filing_type=form,
+        currency=_reporting_currency(xbrl),
+        revenue=revenue,
+        ebit=ebit,
+        operating_cash_flow=operating_cash_flow,
+        capital_expenditure=(abs(capital_expenditure) if capital_expenditure is not None else None),
+        cash_and_equivalents=cash,
+        total_debt=total_debt,
+        diluted_shares=diluted_shares,
+        provenance=DataProvenance(
+            source="sec-edgar-xbrl",
+            retrieved_at=retrieved_at,
+            available_at=accepted_at,
+            raw_reference=_filing_url(filing),
+            adjustments=("consolidated-facts-only", "capex-as-positive-outflow"),
+            metadata={
+                "accession_number": str(accession) if accession is not None else None,
+                "company_cik": company_cik,
+                "period_basis": period_basis,
+                "xbrl_concepts": selected,
+            },
+        ),
+        period_start=period_start,
+        period_basis=period_basis,
+    )
+
+
+def _statement_period_column(frame: Any, report_end: date, basis: str) -> Any:
+    prefix = report_end.isoformat()
+    candidates = [column for column in frame.columns if str(column).startswith(prefix)]
+    if not candidates:
+        raise ValueError(f"XBRL statement has no column for report period {prefix}")
+    if basis == "fiscal-ytd":
+        ytd = [column for column in candidates if "YTD" in str(column).upper()]
+        if ytd:
+            return ytd[0]
+    if basis == "fiscal-year":
+        annual = [column for column in candidates if "FY" in str(column).upper()]
+        if annual:
+            return annual[0]
+        non_quarter = [
+            column
+            for column in candidates
+            if "Q1" not in str(column).upper()
+            and "Q2" not in str(column).upper()
+            and "Q3" not in str(column).upper()
+        ]
+        if non_quarter:
+            return non_quarter[0]
+    return candidates[0]
+
+
+def _statement_value(frame: Any, concepts: Sequence[str], column: Any) -> tuple[float | None, str]:
+    if "concept" not in frame.columns or column not in frame.columns:
+        return None, ""
+    normalized_candidates = {_normalize_concept(concept) for concept in concepts}
+    rows = frame[
+        frame["concept"].map(lambda value: _normalize_concept(str(value))).isin(
+            normalized_candidates
+        )
+    ]
+    if rows.empty and "standard_concept" in frame.columns:
+        rows = frame[
+            frame["standard_concept"].map(lambda value: _normalize_concept(str(value))).isin(
+                normalized_candidates
+            )
+        ]
+    if rows.empty:
+        return None, ""
+    for dimension_column in ("dimension_label", "dimension_axis", "dimension"):
+        if dimension_column in rows.columns:
+            consolidated = rows[rows[dimension_column].isna()]
+            if not consolidated.empty:
+                rows = consolidated
+    for _, row in rows.iterrows():
+        value = row[column]
+        if value is None or _is_nan(value):
+            continue
+        return float(value), str(row["concept"])
+    return None, ""
+
+
+def _normalize_concept(value: str) -> str:
+    return value.replace("us-gaap:", "").replace("us-gaap_", "").replace(":", "_").lower()
+
+
+def _is_nan(value: Any) -> bool:
+    try:
+        return isnan(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _reporting_currency(xbrl: Any) -> str:
+    for concept in ("dei_EntityReportingCurrencyISOCode", "dei_DocumentCurrency"):
+        try:
+            frame = xbrl.facts.query().by_concept(concept, exact=True).to_dataframe(
+                "value"
+            )
+            if not frame.empty:
+                value = str(frame.iloc[0]["value"]).strip().upper()
+                if len(value) == 3 and value.isalpha():
+                    return value
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return "USD"
+
+
+def _column_period_start(xbrl: Any, column: Any, report_end: date) -> date | None:
+    label = str(column).upper()
+    target_days = 150 if "YTD" in label else 300
+    try:
+        frame = xbrl.facts.query().to_dataframe(
+            "period_start", "period_end", "period_type", "is_dimensioned"
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if frame.empty or "period_start" not in frame.columns:
+        return None
+    candidates = []
+    for _, row in frame.iterrows():
+        if str(row.get("period_type", "")) != "duration":
+            continue
+        try:
+            period_end = _as_date(row["period_end"])
+            period_start = _as_date(row["period_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if period_end == report_end and (report_end - period_start).days >= target_days:
+            candidates.append(period_start)
+    return min(candidates) if candidates else None

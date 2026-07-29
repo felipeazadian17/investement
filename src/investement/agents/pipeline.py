@@ -4,12 +4,14 @@ from typing import Any
 from uuid import uuid4
 
 from investement.agents.auditor import AuditorAgent
+from investement.agents.broker import BrokerPortfolioReader, BrokerPortfolioStateReader
 from investement.agents.data import DataAgent
 from investement.agents.fundamental import FundamentalAgent
 from investement.agents.models import (
     AssetAnalysisReport,
     AssetAnalysisRequest,
     BrokerAccountSnapshot,
+    BrokerAwarePortfolioRecommendation,
     InvestorProfile,
     InvestorProfileRequest,
     PortfolioConstructionInputs,
@@ -19,7 +21,6 @@ from investement.agents.portfolio import PortfolioConstructionAgent
 from investement.agents.profile import InvestorProfileAgent
 from investement.agents.relative_valuation import RelativeValuationAgent
 from investement.agents.risk import RiskAgent
-from investement.agents.schwab import SchwabExecutorAgent
 from investement.agents.technical import TechnicalAgent
 from investement.orchestration import InvestmentCommittee
 
@@ -29,7 +30,7 @@ class InvestmentAgentPipeline:
         self,
         data_agent: DataAgent,
         auditor: AuditorAgent | None = None,
-        schwab_agent: SchwabExecutorAgent | None = None,
+        broker_agent: BrokerPortfolioReader | None = None,
         profile_agent: InvestorProfileAgent | None = None,
         fundamental_agent: FundamentalAgent | None = None,
         technical_agent: TechnicalAgent | None = None,
@@ -40,7 +41,7 @@ class InvestmentAgentPipeline:
     ) -> None:
         self._data = data_agent
         self._auditor = auditor
-        self._schwab = schwab_agent
+        self._broker = broker_agent
         self._profile = profile_agent or InvestorProfileAgent()
         self._fundamental = fundamental_agent or FundamentalAgent()
         self._technical = technical_agent or TechnicalAgent()
@@ -143,15 +144,16 @@ class InvestmentAgentPipeline:
         include_positions: bool = True,
         run_id: str | None = None,
     ) -> BrokerAccountSnapshot:
-        if self._schwab is None:
-            raise RuntimeError("Schwab read-only agent is not configured")
+        if self._broker is None:
+            raise RuntimeError("read-only broker agent is not configured")
         active_run_id = run_id or str(uuid4())
-        snapshot = self._schwab.read_portfolio(include_positions=include_positions)
+        snapshot = self._broker.read_portfolio(include_positions=include_positions)
         if self._auditor is not None:
             self._auditor.record(
                 active_run_id,
-                "schwab.portfolio-read",
+                "broker.portfolio-read",
                 {
+                    "provider": self._broker.name,
                     "retrieved_at": snapshot.retrieved_at,
                     "account_count": len(snapshot.accounts),
                     "account_number_count": len(snapshot.account_numbers),
@@ -159,6 +161,44 @@ class InvestmentAgentPipeline:
                 },
             )
         return snapshot
+
+    def construct_portfolio_from_broker(
+        self,
+        inputs: PortfolioConstructionInputs,
+        as_of: datetime,
+        run_id: str | None = None,
+    ) -> BrokerAwarePortfolioRecommendation:
+        if not isinstance(self._broker, BrokerPortfolioStateReader):
+            raise TypeError("configured broker does not provide normalized portfolio state")
+        active_run_id = run_id or str(uuid4())
+        current = self._broker.current_portfolio(inputs.profile.base_currency)
+        current_risk = self._risk.assess_current_portfolio(inputs.profile, current)
+        target = self.construct_portfolio(
+            replace(inputs, current_weights={}),
+            as_of,
+            run_id=active_run_id,
+        )
+        if self._auditor is not None:
+            self._auditor.record(
+                active_run_id,
+                "broker.portfolio-reconciled",
+                {
+                    "provider": current.provider,
+                    "allocation_mode": "initial-independent",
+                    "retrieved_at": current.retrieved_at,
+                    "base_currency": current.base_currency,
+                    "total_value": current.total_value,
+                    "cash_weight": current.cash_weight,
+                    "current_weights": current.current_weights,
+                    "current_risk_approved": current_risk.approved,
+                    "current_risk_breaches": current_risk.breaches,
+                },
+            )
+        return BrokerAwarePortfolioRecommendation(
+            current=current,
+            current_risk=current_risk,
+            target=target,
+        )
 
     def _record_asset_report(self, report: AssetAnalysisReport):
         if self._auditor is None:

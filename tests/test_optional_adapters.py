@@ -75,17 +75,5 @@ class OptionalAdapterTests(unittest.TestCase):
         self.assertIn("filing_date", parameters)
         self.assertIn("amendments", parameters)
 
-    @unittest.skipUnless(available("schwab"), "schwab-py is not installed")
-    def test_schwab_auth_and_account_api_match_facade(self):
-        from schwab.auth import easy_client
-        from schwab.client import Client
-
-        auth_parameters = inspect.signature(easy_client).parameters
-        self.assertTrue(
-            {"api_key", "app_secret", "callback_url", "token_path"} <= auth_parameters.keys()
-        )
-        self.assertEqual(Client.Account.Fields.POSITIONS.value, "positions")
-
-
 if __name__ == "__main__":
     unittest.main()

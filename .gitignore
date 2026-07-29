@@ -9,12 +9,16 @@ __pycache__/
 !.env.example
 
 # Local research state and generated artifacts
+.cache/
 artifacts/
 audit/
 memory/
 output/
+resultados/**/cache/
+
+# Personal financial profiles stay local; only schemas and examples are versioned.
+profiles/*.local.json
 
 # Broker credentials and OAuth material must never enter the repository.
 *schwab*token*.json
 *oauth*token*.json
-

@@ -1,5 +1,6 @@
 import unittest
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -8,22 +9,26 @@ from investement.agents import (
     AssetAnalysisRequest,
     AssetDataRequest,
     AuditorAgent,
+    BrokerAccountSnapshot,
+    BrokerPortfolioState,
     DataAgent,
     FundamentalAgent,
     FundamentalModelInputs,
     InvestmentAgentPipeline,
+    InvestmentExperience,
     InvestorProfileAgent,
     InvestorProfileRequest,
+    LeveragePolicy,
     PortfolioConstructionAgent,
     PortfolioConstructionInputs,
     RelativeValuationAgent,
     RelativeValuationInputs,
     RiskAgent,
     RiskTolerance,
-    SchwabExecutorAgent,
+    TaxPolicy,
     TechnicalAgent,
 )
-from investement.domain import DataProvenance, PriceBar, SignalAction
+from investement.domain import CorporateActionKind, DataProvenance, PriceBar, SignalAction
 from investement.orchestration import (
     AgentFinding,
     CommitteeDecision,
@@ -52,26 +57,41 @@ class FakeFilingProvider:
 
     def __init__(self, filings):
         self.filings = filings
+        self.calls = []
 
-    def latest_filings(self, symbol, forms, limit=10, filed_after=None):
+    def latest_filings(
+        self,
+        symbol,
+        forms,
+        limit=10,
+        filed_after=None,
+        available_before=None,
+    ):
+        self.calls.append((symbol, forms, limit, filed_after, available_before))
         return self.filings[:limit]
 
 
-class FakeSchwabFacade:
-    def account_numbers(self):
-        return ({"accountNumber": "1234", "hashValue": "hash"},)
+class FakePortfolioStateBroker:
+    name = "fake-read-only-broker"
 
-    def accounts(self, include_positions=True):
-        return ({"securitiesAccount": {"positions": [] if include_positions else None}},)
+    def read_portfolio(self, include_positions=True):
+        return BrokerAccountSnapshot(
+            retrieved_at=datetime(2024, 4, 1, tzinfo=UTC),
+            account_numbers=(),
+            accounts=({"include_positions": include_positions},),
+        )
 
-    def account(self, account_hash, include_positions=True):
-        return {"hash": account_hash, "include_positions": include_positions}
-
-    def transactions(self, *args, **kwargs):
-        return ({"type": "DIVIDEND"},)
-
-    def quotes(self, symbols):
-        return {symbol: {"lastPrice": 100.0} for symbol in symbols}
+    def current_portfolio(self, base_currency="USD"):
+        return BrokerPortfolioState(
+            retrieved_at=datetime(2024, 4, 1, tzinfo=UTC),
+            provider=self.name,
+            base_currency=base_currency,
+            total_value=100_000,
+            cash_value=10_000,
+            cash_weight=0.10,
+            position_values={"A": 70_000, "B": 20_000},
+            current_weights={"A": 0.70, "B": 0.20},
+        )
 
 
 class AgentTests(unittest.TestCase):
@@ -91,15 +111,90 @@ class AgentTests(unittest.TestCase):
         self.assertIn("TSLA", profile.prohibited_symbols)
         self.assertIn("tobacco", profile.prohibited_sectors)
 
+    def test_profile_agent_derives_personal_risk_and_reserve_constraints(self):
+        profile = _profile_agent().create_from_mapping(
+            {
+                "objectives": ["Long-term capital growth with continuous reinvestment"],
+                "horizon_years": 20,
+                "base_currency": "USD",
+                "min_cash_weight": 0.05,
+                "max_position_weight": 0.10,
+                "max_drawdown": 0.20,
+                "max_annual_volatility": 0.55,
+                "max_portfolio_annual_volatility": 0.18,
+                "max_asset_drawdown": 0.50,
+                "age": 29,
+                "residence_country": "UY",
+                "tax_residency": "UY",
+                "monthly_net_income": 4_000,
+                "monthly_expenses": 1_500,
+                "liquid_net_worth": 80_000,
+                "portfolio_funding": 80_000,
+                "external_emergency_reserve": 0,
+                "emergency_fund_months_target": 6,
+                "dependents": 0,
+                "income_stability": "stable",
+                "investment_experience": "expert",
+                "short_selling_allowed": False,
+                "leverage_policy": "exceptional",
+                "preferred_styles": ["value", "quality", "dividend-growth"],
+                "prefers_dividends": True,
+                "requires_fixed_income": False,
+                "profile_as_of": "2026-07-28",
+                "tax_policy": {
+                    "jurisdiction": "UY",
+                    "rules_as_of": "2026-07-24",
+                    "foreign_investment_income_taxable": True,
+                    "foreign_capital_gains_taxable": True,
+                    "foreign_tax_credit_available": True,
+                    "tax_lot_method": "weighted-average",
+                    "us_situs_estate_tax_threshold": 60_000,
+                    "prefer_non_us_domiciled_funds": True,
+                },
+            }
+        )
+        self.assertEqual(profile.risk_assessment.capacity, RiskTolerance.AGGRESSIVE)
+        self.assertEqual(profile.risk_assessment.willingness, RiskTolerance.MODERATE)
+        self.assertEqual(profile.risk_tolerance, RiskTolerance.MODERATE)
+        self.assertEqual(profile.risk_assessment.capacity_score, 10)
+        self.assertEqual(profile.monthly_surplus, 2_500)
+        self.assertEqual(profile.emergency_reserve_target, 9_000)
+        self.assertEqual(profile.investable_assets_after_reserve, 71_000)
+        self.assertAlmostEqual(profile.min_cash_weight, 0.1125)
+        self.assertEqual(profile.max_position_weight, 0.06)
+        self.assertEqual(profile.max_portfolio_annual_volatility, 0.18)
+        self.assertEqual(profile.max_asset_drawdown, 0.50)
+        self.assertEqual(profile.investment_experience, InvestmentExperience.EXPERT)
+        self.assertEqual(profile.leverage_policy, LeveragePolicy.EXCEPTIONAL)
+        self.assertFalse(profile.short_selling_allowed)
+        self.assertTrue(profile.tax_policy.foreign_capital_gains_taxable)
+        self.assertEqual(profile.tax_policy.rules_as_of, date(2026, 7, 24))
+
+    def test_profile_agent_rejects_tax_policy_for_another_residency(self):
+        with self.assertRaisesRegex(ValueError, "tax policy jurisdiction"):
+            _profile_agent().create(
+                InvestorProfileRequest(
+                    objectives=("Long-term growth",),
+                    horizon_years=20,
+                    base_currency="USD",
+                    tax_residency="UY",
+                    tax_policy=TaxPolicy(
+                        jurisdiction="AR",
+                        rules_as_of=date(2026, 7, 24),
+                    ),
+                )
+            )
+
     def test_data_agent_enforces_as_of_for_prices_and_filings(self):
         bars = _bars(61)
         as_of = bars[-2].timestamp
         past_filing = _filing("10-Q", as_of - timedelta(days=5))
         future_filing = _filing("8-K", as_of + timedelta(days=1))
         market = FakeMarketDataProvider(bars)
+        filings = FakeFilingProvider((past_filing, future_filing))
         snapshot = DataAgent(
             market,
-            FakeFilingProvider((past_filing, future_filing)),
+            filings,
             clock=lambda: datetime(2025, 1, 1, tzinfo=UTC),
         ).collect(
             AssetDataRequest(
@@ -113,7 +208,35 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(snapshot.bars), 60)
         self.assertEqual(snapshot.filings, (past_filing,))
         self.assertEqual(market.calls[0][2], as_of.date())
+        self.assertIsNone(filings.calls[0][3])
         self.assertTrue(all(bar.timestamp <= as_of for bar in snapshot.bars))
+
+    def test_data_agent_exposes_corporate_actions_and_uses_raw_latest_price(self):
+        bars = list(_bars(2))
+        bars[1] = replace(
+            bars[1],
+            adjusted_close=bars[1].close + 5.0,
+            provenance=replace(
+                bars[1].provenance,
+                metadata={"dividend": 0.25, "stock_split": 2.0},
+            ),
+        )
+        snapshot = DataAgent(
+            FakeMarketDataProvider(tuple(bars)),
+            clock=lambda: datetime(2025, 1, 1, tzinfo=UTC),
+        ).collect(
+            AssetDataRequest(
+                symbol="AAPL",
+                start=bars[0].timestamp.date(),
+                end=bars[-1].timestamp.date(),
+                as_of=bars[-1].timestamp,
+            )
+        )
+        self.assertEqual(snapshot.latest_price, bars[-1].close)
+        self.assertEqual(
+            tuple(action.kind for action in snapshot.corporate_actions),
+            (CorporateActionKind.DIVIDEND, CorporateActionKind.SPLIT),
+        )
 
     def test_analyst_agents_produce_compatible_structured_findings(self):
         snapshot = _snapshot()
@@ -182,18 +305,6 @@ class AgentTests(unittest.TestCase):
         self.assertIn("C", plan.excluded_assets)
         self.assertIn("D", plan.excluded_assets)
         self.assertAlmostEqual(sum(plan.allocation.weights.values()), 0.95)
-
-    def test_schwab_executor_agent_has_read_capabilities_only(self):
-        agent = SchwabExecutorAgent(
-            FakeSchwabFacade(),
-            clock=lambda: datetime(2024, 1, 1, tzinfo=UTC),
-        )
-        snapshot = agent.read_portfolio()
-        self.assertEqual(len(snapshot.accounts), 1)
-        self.assertEqual(agent.read_account("hash")["hash"], "hash")
-        self.assertFalse(hasattr(agent, "place_order"))
-        self.assertFalse(hasattr(agent, "execute"))
-        self.assertFalse(hasattr(agent, "cancel_order"))
 
     def test_auditor_redacts_secrets_and_keeps_a_valid_hash_chain(self):
         with TemporaryDirectory() as directory:
@@ -267,10 +378,7 @@ class AgentTests(unittest.TestCase):
                     JsonlAuditLog(root / "audit.jsonl"),
                     JsonMemoryStore(root / "memory"),
                 ),
-                schwab_agent=SchwabExecutorAgent(
-                    FakeSchwabFacade(),
-                    clock=lambda: datetime(2024, 4, 1, tzinfo=UTC),
-                ),
+                broker_agent=FakePortfolioStateBroker(),
             )
             profile = pipeline.create_profile(
                 _profile_request(max_position_weight=0.60, max_annual_volatility=1.0)
@@ -294,6 +402,31 @@ class AgentTests(unittest.TestCase):
             1.0,
         )
         self.assertEqual(len(broker.accounts), 1)
+
+    def test_pipeline_builds_initial_allocation_independent_of_broker_positions(self):
+        pipeline = InvestmentAgentPipeline(
+            DataAgent(FakeMarketDataProvider(_bars(90))),
+            broker_agent=FakePortfolioStateBroker(),
+        )
+        profile = pipeline.create_profile(
+            _profile_request(max_position_weight=0.60, max_annual_volatility=1.0)
+        )
+        result = pipeline.construct_portfolio_from_broker(
+            PortfolioConstructionInputs(
+                profile=profile,
+                returns={
+                    "A": (0.01, 0.02, -0.01, 0.01),
+                    "B": (0.001, 0.002, 0.0015, 0.0025),
+                },
+            ),
+            as_of=datetime(2024, 4, 1, tzinfo=UTC),
+        )
+        rebalance = {item.symbol: item for item in result.target.plan.rebalances}
+        self.assertFalse(result.current_risk.approved)
+        self.assertIn("A", result.current_risk.breaches[0])
+        self.assertEqual(result.current.current_weights["A"], 0.70)
+        self.assertEqual(rebalance["A"].current_weight, 0.0)
+        self.assertTrue(result.target.approved)
 
 
 def _profile_agent() -> InvestorProfileAgent:

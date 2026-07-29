@@ -13,6 +13,20 @@ class SignalAction(str, Enum):
     SELL = "sell"
 
 
+class CorporateActionKind(str, Enum):
+    DIVIDEND = "dividend"
+    CAPITAL_GAIN = "capital_gain"
+    SPLIT = "split"
+
+
+class InstrumentType(str, Enum):
+    EQUITY = "equity"
+    ETF = "etf"
+    MUTUAL_FUND = "mutual_fund"
+    OPTION = "option"
+    UNKNOWN = "unknown"
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -88,6 +102,8 @@ class FundamentalSnapshot:
     total_debt: float | None
     diluted_shares: float | None
     provenance: DataProvenance
+    period_start: date | None = None
+    period_basis: str | None = None
 
     def __post_init__(self) -> None:
         if not self.symbol.strip():
@@ -108,3 +124,158 @@ class FundamentalSnapshot:
                 require_finite(float(value), name)
         if self.diluted_shares is not None and self.diluted_shares <= 0:
             raise ValueError("diluted_shares must be positive")
+        if self.period_start is not None and self.period_start > self.period_end:
+            raise ValueError("period_start cannot be after period_end")
+
+    @property
+    def free_cash_flow(self) -> float | None:
+        if self.operating_cash_flow is None or self.capital_expenditure is None:
+            return None
+        return self.operating_cash_flow - self.capital_expenditure
+
+
+@dataclass(frozen=True)
+class CorporateAction:
+    symbol: str
+    effective_at: datetime
+    kind: CorporateActionKind
+    value: float
+    currency: str | None
+    provenance: DataProvenance
+
+    def __post_init__(self) -> None:
+        if not self.symbol.strip():
+            raise ValueError("symbol cannot be empty")
+        require_aware(self.effective_at, "effective_at")
+        require_finite(self.value, "value")
+        if self.value <= 0:
+            raise ValueError("corporate action value must be positive")
+
+
+@dataclass(frozen=True)
+class FundHolding:
+    symbol: str | None
+    name: str
+    weight: float
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("holding name cannot be empty")
+        require_finite(self.weight, "weight")
+        if not 0 <= self.weight <= 1:
+            raise ValueError("holding weight must be between zero and one")
+
+
+@dataclass(frozen=True)
+class FundSnapshot:
+    symbol: str
+    instrument_type: InstrumentType
+    description: str | None
+    category: str | None
+    family: str | None
+    expense_ratio: float | None
+    net_assets: float | None
+    asset_classes: Mapping[str, float]
+    sector_weights: Mapping[str, float]
+    top_holdings: tuple[FundHolding, ...]
+    provenance: DataProvenance
+
+    def __post_init__(self) -> None:
+        if not self.symbol.strip():
+            raise ValueError("symbol cannot be empty")
+        if self.instrument_type not in (InstrumentType.ETF, InstrumentType.MUTUAL_FUND):
+            raise ValueError("fund snapshot requires an ETF or mutual fund")
+        for name, value in (
+            ("expense_ratio", self.expense_ratio),
+            ("net_assets", self.net_assets),
+        ):
+            if value is not None:
+                require_finite(value, name)
+                if value < 0:
+                    raise ValueError(f"{name} cannot be negative")
+        for weights in (self.asset_classes, self.sector_weights):
+            if any(not isfinite(value) or value < 0 for value in weights.values()):
+                raise ValueError("fund weights must be finite and non-negative")
+
+
+@dataclass(frozen=True)
+class OptionContractSnapshot:
+    contract_symbol: str
+    underlying_symbol: str
+    expiration: date
+    option_type: str
+    strike: float
+    bid: float | None
+    ask: float | None
+    last_price: float | None
+    implied_volatility: float | None
+    open_interest: float | None
+    volume: float | None
+    in_the_money: bool | None
+    last_trade_at: datetime | None
+    currency: str | None
+    contract_size: str | None
+
+    def __post_init__(self) -> None:
+        if not self.contract_symbol.strip() or not self.underlying_symbol.strip():
+            raise ValueError("option symbols cannot be empty")
+        if self.option_type not in ("call", "put"):
+            raise ValueError("option_type must be call or put")
+        require_finite(self.strike, "strike")
+        if self.strike <= 0:
+            raise ValueError("strike must be positive")
+        for name in (
+            "bid",
+            "ask",
+            "last_price",
+            "implied_volatility",
+            "open_interest",
+            "volume",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                require_finite(value, name)
+                if value < 0:
+                    raise ValueError(f"{name} cannot be negative")
+        if self.last_trade_at is not None:
+            require_aware(self.last_trade_at, "last_trade_at")
+
+
+@dataclass(frozen=True)
+class OptionChainSnapshot:
+    underlying_symbol: str
+    expiration: date
+    contracts: tuple[OptionContractSnapshot, ...]
+    provenance: DataProvenance
+
+    def __post_init__(self) -> None:
+        if not self.underlying_symbol.strip() or not self.contracts:
+            raise ValueError("option chain requires an underlying and contracts")
+        if any(contract.expiration != self.expiration for contract in self.contracts):
+            raise ValueError("option contracts must match the chain expiration")
+
+
+@dataclass(frozen=True)
+class MarketDataDiscrepancy:
+    timestamp: datetime
+    primary_close: float
+    secondary_close: float
+    relative_difference: float
+
+
+@dataclass(frozen=True)
+class MarketDataReconciliation:
+    primary_source: str
+    secondary_source: str
+    overlap_count: int
+    max_relative_difference: float
+    discrepancies: tuple[MarketDataDiscrepancy, ...]
+    checked_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.primary_source.strip() or not self.secondary_source.strip():
+            raise ValueError("reconciliation sources cannot be empty")
+        if self.overlap_count < 0:
+            raise ValueError("overlap_count cannot be negative")
+        require_finite(self.max_relative_difference, "max_relative_difference")
+        require_aware(self.checked_at, "checked_at")

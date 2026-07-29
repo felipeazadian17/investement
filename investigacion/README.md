@@ -224,10 +224,9 @@ omitir.
   cliente reconocible y limitan automatizaciones a un maximo de 10 requests por
   segundo. El proveedor local exige nombre/email y delega throttling/cache a
   EdgarTools.
-- [Schwab y acceso seguro mediante tokens](https://www.schwab.com/legal/public-security-tips-popup)
-  junto con [experiencias de acceso a la API](https://www.reddit.com/r/Schwab/comments/17s7nxm/has_anyone_gotten_api_access_yet/): OAuth, aprobacion de la app y
-  renovacion de tokens son dependencias operativas reales. Nuestro facade no
-  expone metodos de ordenes y obliga a guardar el token fuera del repositorio.
+- [Documentacion de SnapTrade](https://docs.snaptrade.com/): la Personal API Key
+  permite centralizar la lectura del broker sin incorporar un segundo flujo OAuth
+  al proyecto. La fachada local no expone metodos de ordenes.
 - [Licencia oficial de vectorbt](https://github.com/polakowo/vectorbt/blob/master/LICENSE.md):
   agrega Commons Clause a Apache-2.0 y restringe vender servicios cuyo valor
   derive sustancialmente del software. Se mantiene como extra opcional sujeto a
@@ -259,6 +258,19 @@ omitir.
 - Ventaja: objetos tipados, DataFrames, rate-limit awareness y acceso sin API
   key directamente a SEC EDGAR.
 - Version revisada: 5.43.1; requiere Python 3.10 o superior.
+
+### Contraste de mercado: Alpha Vantage
+
+- Documentacion: https://www.alphavantage.co/documentation/
+- Uso previsto: fuente secundaria independiente para contrastar cierres diarios
+  de Yahoo y detectar diferencias superiores a una tolerancia explicita.
+- Integracion: `AlphaVantageProvider` normaliza `TIME_SERIES_DAILY`; el wrapper
+  `ReconciledMarketDataProvider` devuelve las barras primarias y adjunta el
+  reporte de diferencias al snapshot.
+- Limites: el endpoint diario es raw/as-traded y no incluye dividendos ni splits;
+  por eso la comparacion se restringe por defecto a los ultimos 20 puntos. El
+  plan gratuito entrega 100 observaciones con `compact`; `full` es premium.
+- Secreto: `ALPHA_VANTAGE_API_KEY` vive en `.env.local` y nunca se versiona.
 
 ### Construccion de portfolio: PyPortfolioOpt
 
@@ -308,19 +320,13 @@ omitir.
   revision legal antes de cualquier distribucion comercial; por eso permanece
   como extra opcional y existe un motor determinista propio.
 
-### Charles Schwab: schwab-py
+### Broker: SnapTrade Personal
 
-- Repositorio: https://github.com/alexgolec/schwab-py
-- Paquete: `schwab-py`.
-- Licencia: MIT.
-- Traccion observada: aproximadamente 424 estrellas.
-- Uso previsto inicial: OAuth, lectura de cuentas, posiciones, transacciones,
-  cotizaciones e historicos.
-- Integracion: adaptador `SchwabReadOnlyClient` sin metodos publicos de escritura.
-- Limites: wrapper no oficial; Schwab no ofrece paper trading por esta API; la
-  aplicacion de Schwab debe ser aprobada y los tokens necesitan almacenamiento
-  seguro.
-- Version revisada: 1.5.1; requiere Python 3.10 o superior.
+- Documentacion: https://docs.snaptrade.com/
+- Uso previsto: lectura normalizada de cuentas, saldos y posiciones vinculadas.
+- Integracion: `ReadOnlySnapTradeClient` y `SnapTradeBrokerAgent`.
+- Credenciales: `clientId` y `consumerKey` guardados en macOS Keychain.
+- Limite deliberado: no se exponen metodos para crear, modificar o cancelar ordenes.
 
 ## Mapeo a los agentes de Investement
 
@@ -333,7 +339,7 @@ omitir.
 | Relative Valuation | DCF y comparables | margen de seguridad y condiciones de tesis |
 | Portfolio Construction | PyPortfolioOpt, Riskfolio | restricciones del inversor y rebalanceo |
 | Risk | Riskfolio, QuantStats | hard limits, bloqueos y explicaciones |
-| Schwab Executor | schwab-py | read-only, simulacion y aprobacion humana |
+| Broker | SnapTrade Personal | cuentas, saldos y posiciones read-only |
 | Auditor | patrones TradingAgents/Vibe-Trading | event log, hashes, versiones y resultados |
 
 ## Frontera entre codigo y LLM
@@ -380,8 +386,8 @@ Fuentes externas
    manteniendo un fallback determinista simple.
 5. Crear orquestacion, memoria, debate y auditoria propios usando los patrones de
    TradingAgents, FinRobot, Dexter y Vibe-Trading.
-6. Crear un adaptador de Schwab estrictamente read-only con OAuth y gestion de
-   configuracion, sin habilitar ordenes.
+6. Crear un adaptador de SnapTrade Personal estrictamente read-only, con secretos
+   fuera del repositorio y sin habilitar ordenes.
 
 ## Regla de adopcion
 
@@ -400,7 +406,7 @@ Los seis puntos quedaron implementados como una primera base vertical:
 | 3. Portfolio | `src/investement/portfolio/` | contrato comun, restricciones y backends opcionales |
 | 4. Backtest | `src/investement/backtesting/` | motor causal, costos, metricas y adaptadores |
 | 5. Orquestacion | `src/investement/orchestration/` y `src/investement/agents/` | nueve agentes, pipeline, comite, memoria y audit log con hash chain |
-| 6. Schwab | `src/investement/brokers/schwab_read_only.py` | OAuth y superficie estrictamente read-only |
+| 6. Broker | `src/investement/brokers/snaptrade_personal.py` | Personal API Key y superficie estrictamente read-only |
 
 Las skills revisadas y su procedencia estan documentadas en
 [`skills/README.md`](../skills/README.md). Las dependencias externas son extras
