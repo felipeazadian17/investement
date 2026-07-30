@@ -7,7 +7,8 @@ from investement.agents.models import AuditReceipt
 from investement.orchestration import JsonlAuditLog, JsonMemoryStore
 
 _SENSITIVE_KEY = re.compile(
-    r"api.?key|secret|token|password|authorization",
+    r"api.?key|secret|token|password|authorization|consumer.?key|client.?id|"
+    r"credential|signature|cookie|account.?number",
     re.IGNORECASE,
 )
 

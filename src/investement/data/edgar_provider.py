@@ -132,7 +132,7 @@ class EdgarProvider:
         self,
         symbol: str,
         forms: Sequence[str] = ("10-K", "10-Q"),
-        limit: int = 4,
+        limit: int = 8,
         filed_after: date | None = None,
         available_before: datetime | None = None,
     ) -> Sequence[FundamentalSnapshot]:
@@ -166,6 +166,7 @@ class EdgarProvider:
                     filing,
                     retrieved_at,
                     company_cik=getattr(company, "cik", None),
+                    company_sic=getattr(company, "sic", None),
                 )
             )
             if len(snapshots) == limit:
@@ -218,6 +219,20 @@ _CONCEPTS = {
         "Revenues",
     ),
     "ebit": ("OperatingIncomeLoss",),
+    "net_income": (
+        "NetIncomeLoss",
+        "ProfitLoss",
+    ),
+    "pretax_income": (
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    ),
+    "income_tax_expense": ("IncomeTaxExpenseBenefit",),
+    "interest_expense": (
+        "InterestExpenseNonOperating",
+        "InterestAndDebtExpense",
+        "InterestExpense",
+    ),
     "operating_cash_flow": (
         "NetCashProvidedByUsedInOperatingActivities",
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
@@ -225,6 +240,14 @@ _CONCEPTS = {
     "capital_expenditure": (
         "PaymentsToAcquirePropertyPlantAndEquipment",
         "PaymentsToAcquireProductiveAssets",
+    ),
+    "depreciation_and_amortization": (
+        "DepreciationDepletionAndAmortization",
+        "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+    ),
+    "stock_based_compensation": (
+        "ShareBasedCompensation",
+        "AllocatedShareBasedCompensationExpense",
     ),
     "cash_and_equivalents": (
         "CashAndCashEquivalentsAtCarryingValue",
@@ -243,6 +266,38 @@ _CONCEPTS = {
         "LongTermDebtAndFinanceLeaseObligations",
         "LongTermDebt",
     ),
+    "short_term_investments": (
+        "ShortTermInvestments",
+        "MarketableSecuritiesCurrent",
+    ),
+    "long_term_investments": (
+        "LongTermInvestments",
+        "MarketableSecuritiesNoncurrent",
+    ),
+    "operating_lease_current": ("OperatingLeaseLiabilityCurrent",),
+    "operating_lease_noncurrent": ("OperatingLeaseLiabilityNoncurrent",),
+    "operating_lease_total": ("OperatingLeaseLiability",),
+    "preferred_stock": (
+        "PreferredStocksIncludingAdditionalPaidInCapital",
+        "PreferredStockValue",
+    ),
+    "noncontrolling_interest": (
+        "MinorityInterest",
+        "NoncontrollingInterestInConsolidatedEntity",
+    ),
+    "pension_liabilities": (
+        "PensionAndOtherPostretirementDefinedBenefitPlansLiabilitiesNoncurrent",
+        "DefinedBenefitPensionPlanLiabilitiesNoncurrent",
+    ),
+    "total_equity": (
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+        "StockholdersEquity",
+    ),
+    "total_assets": ("Assets",),
+    "current_shares_outstanding": (
+        "EntityCommonStockSharesOutstanding",
+        "CommonStockSharesOutstanding",
+    ),
     "diluted_shares": ("WeightedAverageNumberOfDilutedSharesOutstanding",),
 }
 
@@ -252,6 +307,7 @@ def _extract_fundamental_snapshot(
     filing: Any,
     retrieved_at: datetime,
     company_cik: Any = None,
+    company_sic: Any = None,
 ) -> FundamentalSnapshot:
     accepted_at = _accepted_at(filing)
     report_end = _as_date(
@@ -273,12 +329,26 @@ def _extract_fundamental_snapshot(
         income, _CONCEPTS["revenue"], duration_column
     )
     ebit, selected["ebit"] = _statement_value(income, _CONCEPTS["ebit"], duration_column)
+    duration_values = {}
+    for name in (
+        "net_income",
+        "pretax_income",
+        "income_tax_expense",
+        "interest_expense",
+    ):
+        duration_values[name], selected[name] = _statement_value(
+            income, _CONCEPTS[name], duration_column
+        )
     operating_cash_flow, selected["operating_cash_flow"] = _statement_value(
         cash_flow, _CONCEPTS["operating_cash_flow"], cash_flow_column
     )
     capital_expenditure, selected["capital_expenditure"] = _statement_value(
         cash_flow, _CONCEPTS["capital_expenditure"], cash_flow_column
     )
+    for name in ("depreciation_and_amortization", "stock_based_compensation"):
+        duration_values[name], selected[name] = _statement_value(
+            cash_flow, _CONCEPTS[name], cash_flow_column
+        )
     cash, selected["cash_and_equivalents"] = _statement_value(
         balance, _CONCEPTS["cash_and_equivalents"], instant_column
     )
@@ -299,6 +369,34 @@ def _extract_fundamental_snapshot(
         )
     diluted_shares, selected["diluted_shares"] = _statement_value(
         income, _CONCEPTS["diluted_shares"], duration_column
+    )
+    instant_values = {}
+    for name in (
+        "short_term_investments",
+        "long_term_investments",
+        "preferred_stock",
+        "noncontrolling_interest",
+        "pension_liabilities",
+        "total_equity",
+        "total_assets",
+        "current_shares_outstanding",
+    ):
+        instant_values[name], selected[name] = _statement_value(
+            balance, _CONCEPTS[name], instant_column
+        )
+        if instant_values[name] is None:
+            instant_values[name], selected[name] = _instant_fact_value(
+                xbrl,
+                _CONCEPTS[name],
+                report_end,
+                accepted_at.date() if name == "current_shares_outstanding" else report_end,
+            )
+    operating_lease, selected["operating_lease_liabilities"] = _combined_value(
+        balance,
+        instant_column,
+        _CONCEPTS["operating_lease_current"],
+        _CONCEPTS["operating_lease_noncurrent"],
+        _CONCEPTS["operating_lease_total"],
     )
 
     period_start = _column_period_start(xbrl, duration_column, report_end)
@@ -324,12 +422,16 @@ def _extract_fundamental_snapshot(
             metadata={
                 "accession_number": str(accession) if accession is not None else None,
                 "company_cik": company_cik,
+                "company_sic": company_sic,
                 "period_basis": period_basis,
                 "xbrl_concepts": selected,
             },
         ),
         period_start=period_start,
         period_basis=period_basis,
+        **duration_values,
+        **instant_values,
+        operating_lease_liabilities=operating_lease,
     )
 
 
@@ -388,6 +490,61 @@ def _statement_value(frame: Any, concepts: Sequence[str], column: Any) -> tuple[
     return None, ""
 
 
+def _combined_value(
+    frame: Any,
+    column: Any,
+    current_concepts: Sequence[str],
+    noncurrent_concepts: Sequence[str],
+    total_concepts: Sequence[str],
+) -> tuple[float | None, str]:
+    current, current_concept = _statement_value(frame, current_concepts, column)
+    noncurrent, noncurrent_concept = _statement_value(frame, noncurrent_concepts, column)
+    if current is not None or noncurrent is not None:
+        concepts = "+".join(
+            item for item in (current_concept, noncurrent_concept) if item
+        )
+        return (current or 0.0) + (noncurrent or 0.0), concepts
+    return _statement_value(frame, total_concepts, column)
+
+
+def _instant_fact_value(
+    xbrl: Any,
+    concepts: Sequence[str],
+    minimum_date: date,
+    maximum_date: date,
+) -> tuple[float | None, str]:
+    candidates = []
+    for concept in concepts:
+        prefixes = ("dei_", "dei:") if concept.startswith("Entity") else ("us-gaap_", "us-gaap:")
+        for qualified in (concept, *(prefix + concept for prefix in prefixes)):
+            try:
+                frame = xbrl.facts.query().by_concept(qualified, exact=True).to_dataframe()
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+            if frame.empty:
+                continue
+            for _, row in frame.iterrows():
+                if bool(row.get("is_dimensioned", False)):
+                    continue
+                instant = row.get("period_instant")
+                if instant is None or _is_nan(instant):
+                    continue
+                try:
+                    instant_date = _as_date(instant)
+                except (TypeError, ValueError):
+                    continue
+                if not minimum_date <= instant_date <= maximum_date:
+                    continue
+                value = row.get("numeric_value", row.get("value"))
+                if value is None or _is_nan(value):
+                    continue
+                candidates.append((instant_date, float(value), str(row.get("concept", qualified))))
+    if not candidates:
+        return None, ""
+    _, value, selected = max(candidates, key=lambda item: item[0])
+    return value, selected
+
+
 def _normalize_concept(value: str) -> str:
     return value.replace("us-gaap:", "").replace("us-gaap_", "").replace(":", "_").lower()
 
@@ -415,8 +572,6 @@ def _reporting_currency(xbrl: Any) -> str:
 
 
 def _column_period_start(xbrl: Any, column: Any, report_end: date) -> date | None:
-    label = str(column).upper()
-    target_days = 150 if "YTD" in label else 300
     try:
         frame = xbrl.facts.query().to_dataframe(
             "period_start", "period_end", "period_type", "is_dimensioned"
@@ -434,6 +589,7 @@ def _column_period_start(xbrl: Any, column: Any, report_end: date) -> date | Non
             period_start = _as_date(row["period_start"])
         except (KeyError, TypeError, ValueError):
             continue
-        if period_end == report_end and (report_end - period_start).days >= target_days:
+        duration_days = (report_end - period_start).days
+        if period_end == report_end and 30 <= duration_days <= 400:
             candidates.append(period_start)
     return min(candidates) if candidates else None

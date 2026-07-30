@@ -268,6 +268,26 @@ class DataProviderTests(unittest.TestCase):
                     "dimension_label": None,
                     period_column: 10.0,
                 },
+                {
+                    "concept": "us-gaap_NetIncomeLoss",
+                    "dimension_label": None,
+                    period_column: 30.0,
+                },
+                {
+                    "concept": "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+                    "dimension_label": None,
+                    period_column: 38.0,
+                },
+                {
+                    "concept": "us-gaap_IncomeTaxExpenseBenefit",
+                    "dimension_label": None,
+                    period_column: 8.0,
+                },
+                {
+                    "concept": "us-gaap_InterestExpenseNonOperating",
+                    "dimension_label": None,
+                    period_column: 2.0,
+                },
             ]
         )
         balance = pd.DataFrame(
@@ -287,6 +307,31 @@ class DataProviderTests(unittest.TestCase):
                     "dimension_label": None,
                     "2024-03-30": 20.0,
                 },
+                {
+                    "concept": "us-gaap_MarketableSecuritiesCurrent",
+                    "dimension_label": None,
+                    "2024-03-30": 4.0,
+                },
+                {
+                    "concept": "us-gaap_OperatingLeaseLiabilityCurrent",
+                    "dimension_label": None,
+                    "2024-03-30": 1.0,
+                },
+                {
+                    "concept": "us-gaap_OperatingLeaseLiabilityNoncurrent",
+                    "dimension_label": None,
+                    "2024-03-30": 3.0,
+                },
+                {
+                    "concept": "us-gaap_StockholdersEquity",
+                    "dimension_label": None,
+                    "2024-03-30": 70.0,
+                },
+                {
+                    "concept": "us-gaap_Assets",
+                    "dimension_label": None,
+                    "2024-03-30": 120.0,
+                },
             ]
         )
         cash_flow = pd.DataFrame(
@@ -300,6 +345,16 @@ class DataProviderTests(unittest.TestCase):
                     "concept": "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment",
                     "dimension_label": None,
                     period_column: -7.0,
+                },
+                {
+                    "concept": "us-gaap_DepreciationDepletionAndAmortization",
+                    "dimension_label": None,
+                    period_column: 6.0,
+                },
+                {
+                    "concept": "us-gaap_ShareBasedCompensation",
+                    "dimension_label": None,
+                    period_column: 3.0,
                 },
             ]
         )
@@ -328,6 +383,12 @@ class DataProviderTests(unittest.TestCase):
         self.assertEqual(snapshot.capital_expenditure, 7.0)
         self.assertEqual(snapshot.free_cash_flow, 43.0)
         self.assertEqual(snapshot.total_debt, 25.0)
+        self.assertEqual(snapshot.net_income, 30.0)
+        self.assertEqual(snapshot.interest_expense, 2.0)
+        self.assertEqual(snapshot.short_term_investments, 4.0)
+        self.assertEqual(snapshot.operating_lease_liabilities, 4.0)
+        self.assertEqual(snapshot.total_equity, 70.0)
+        self.assertEqual(snapshot.depreciation_and_amortization, 6.0)
         self.assertEqual(snapshot.period_basis, "fiscal-ytd")
         self.assertEqual(snapshot.provenance.metadata["accession_number"], "0001-24-000001")
 

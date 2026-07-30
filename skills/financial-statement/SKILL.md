@@ -1,262 +1,161 @@
 ---
 name: financial-statement
-description: 财报三表深度解读——三表勾稽关系、盈利质量(应计vs现金流)分析、杜邦分解、10+财务造假红旗指标
-category: flow
+description: Analyze and reconcile income statements, balance sheets, cash-flow statements, LTM periods, earnings quality, invested capital, DuPont drivers, accounting differences, and reporting red flags. Use for fundamental analysis, financial-statement normalization, cash conversion, ROIC, or valuation inputs.
 ---
 
-# 财报三表解读
+# Financial Statement Analysis
 
-## 概述
+## Analysis Contract
 
-从三张报表（利润表、资产负债表、现金流量表）的勾稽关系出发，深度分析企业盈利质量，识别财务造假信号，用杜邦分析分解盈利驱动因子。
+Set the purpose, accounting basis, currency and `as_of` before calculating. Use
+filings available at the cutoff and preserve reported values separately from
+normalizations. Compare a company with its own history and genuinely comparable
+peers; avoid universal healthy ranges across industries.
 
-## 三表核心框架
+For SEC filings, read [`../edgar-sec-filings/SKILL.md`](../edgar-sec-filings/SKILL.md).
 
-### 利润表（赚了多少）
+## Three-Statement Reconciliation
 
-```
-营业收入
- - 营业成本               → 毛利润（毛利率 = 毛利/营收）
- - 销售费用 + 管理费用 + 研发费用  → 核心利润
- + 投资收益 + 公允价值变动        → 营业利润
- + 营业外收支               → 利润总额
- - 所得税                 → 净利润
- - 少数股东损益              → 归母净利润
-```
+Required identities and roll-forwards:
 
-**关键比率**：
-
-| 比率 | 公式 | 健康范围 | 警示 |
-|------|------|---------|------|
-| 毛利率 | 毛利/营收 | 行业差异大 | 连续3季下滑 |
-| 净利率 | 净利/营收 | >10%优秀 | <0%且无改善趋势 |
-| 期间费用率 | (销管研)/营收 | <30% | 逐年上升 |
-| 扣非/归母 | 扣非净利/归母净利 | >80% | <50%依赖非经常 |
-
-### 资产负债表（有什么家底）
-
-```
-资产 = 负债 + 所有者权益
-
-资产端重点:
-- 货币资金: 是否受限？存贷双高？
-- 应收账款: 增速是否超过营收？
-- 存货: 是否积压？跌价准备够不够？
-- 商誉: 并购溢价，减值风险
-- 在建工程: 是否长期不转固？
-
-负债端重点:
-- 有息负债: 短期借款+长期借款+应付债券
-- 应付账款: 对上游议价权
-- 预收/合同负债: 对下游议价权
+```text
+assets = liabilities + equity
+ending cash = beginning cash + CFO + CFI + CFF + FX/other effects
+ending retained earnings = beginning retained earnings + net income - dividends +/- adjustments
+ending debt = beginning debt + issuance - repayment +/- noncash changes
 ```
 
-**关键比率**：
+Investigate differences rather than forcing plugs. Check units, signs, fiscal
+periods, acquisitions, discontinued operations and changes in consolidation.
 
-| 比率 | 公式 | 健康范围 |
-|------|------|---------|
-| 资产负债率 | 负债/资产 | 40-60%（非金融） |
-| 流动比率 | 流动资产/流动负债 | 1.5-2.5 |
-| 速动比率 | (流动资产-存货)/流动负债 | >1.0 |
-| 有息负债率 | 有息负债/总资产 | <30% |
+## LTM and Interim Periods
 
-### 现金流量表（真正拿到多少现金）
+Distinguish duration and instant facts. For a latest interim filing:
 
-```
-经营活动现金流(CFO): 做生意赚的现金
-投资活动现金流(CFI): 买卖资产花的现金
-筹资活动现金流(CFF): 借钱/还钱/分红
-
-黄金公式: 净利润 ≈ CFO（长期来看）
+```text
+LTM duration metric = latest FY + current YTD - comparable prior YTD
 ```
 
-**现金流质量矩阵**：
+Use the latest balance sheet for instant metrics. Reconstruct weighted diluted
+shares with share-days. Compare growth YTD/YTD or FY/FY, not sequential rolling
+LTM values. All component filings must have been accepted by `as_of`.
 
-| CFO | CFI | CFF | 企业状态 |
-|-----|-----|-----|---------|
-| + | - | - | 优秀（赚钱、投资、还债） |
-| + | - | + | 扩张（赚钱、投资、借钱加速） |
-| + | + | - | 稳健（赚钱、回收投资、还债） |
-| - | - | + | 危险（亏钱、还在投、靠借钱活） |
-| - | + | + | 困境（卖资产+借钱维持） |
-| - | + | - | 衰退（卖资产还债） |
+## Income Statement
 
-## 三表勾稽关系
+Analyze:
 
-### 核心勾稽
+- Revenue by product, segment, geography, volume and price.
+- Gross and operating margin, including mix and operating leverage.
+- Recurring versus restructuring, impairment, disposal and litigation items.
+- R&D and other capitalization policies.
+- Interest classification, tax normalization and NCI attribution.
+- Diluted EPS and potential dilution from SBC, options and convertibles.
 
-```
-1. 利润表 → 资产负债表
-   净利润 → 留存收益（未分配利润增加）
-   应收增加 = 收入 - 实际收款
-   存货增加 = 采购 - 已售成本
+Normalize only when the adjustment is economically justified and separately
+visible. Repeated restructuring is not automatically non-recurring.
 
-2. 利润表 → 现金流量表
-   净利润 + 折旧 - 营运资本增加 ≈ 经营现金流
-   如果差异大 → 盈利质量存疑
+## Balance Sheet and Invested Capital
 
-3. 资产负债表 → 现金流量表
-   期末现金 = 期初现金 + CFO + CFI + CFF
-   货币资金变动 = 三个现金流之和
+Separate operating assets from financing and nonoperating assets:
+
+```text
+invested capital = operating assets - non-interest-bearing operating liabilities
 ```
 
-### 勾稽验证公式
+An equity-side approximation may use common equity plus debt and capitalized
+leases, less excess cash and nonoperating investments, with explicit treatment
+of preferred stock and NCI.
 
-```python
-# 验证盈利质量
-accrual_ratio = (net_income - cfo) / total_assets
-# accrual_ratio > 10% → 应计利润占比高，盈利质量差
+Inspect:
 
-# 验证收入质量
-receivable_growth = accounts_receivable.pct_change()
-revenue_growth = revenue.pct_change()
-# receivable_growth > revenue_growth → 收入质量恶化
+- Restricted versus available cash.
+- Short- and long-term investments.
+- Debt maturities, leases, covenants and refinancing risk.
+- Receivables, inventory, contract balances and supplier financing.
+- Goodwill, acquired intangibles and impairment assumptions.
+- Pension deficits, environmental liabilities and contingent claims.
 
-# 验证资产负债表与现金流一致性
-cash_change = cash_end - cash_begin
-cf_total = cfo + cfi + cff
-# abs(cash_change - cf_total) > 1 → 数据有问题
+Do not call all cash excess or all investments nonoperating without reviewing
+business requirements and regulatory constraints.
+
+## Cash Flow and Earnings Quality
+
+Core reconciliation:
+
+```text
+CFO = net income + noncash items - increase in operating working capital
+levered FCF = CFO - capex
+FCFF cash-flow bridge = CFO - capex + interest * (1 - normalized tax rate)
 ```
 
-## 盈利质量分析
+Under US GAAP, interest paid is normally in CFO, so `CFO - capex` is not a clean
+FCFF measure. Under IFRS, interest and dividends can be classified differently;
+normalize before cross-company comparison.
 
-### 应计 vs 现金流
+Analyze CFO versus net income over multiple periods, but do not use one fixed
+conversion threshold for every industry. Explain working capital, taxes,
+provisions, SBC, leases and acquisition effects.
 
-```
-高质量盈利:
-- CFO / 净利润 > 1.0（现金利润大于纸面利润）
-- 应收账款增速 < 营收增速
-- 经营现金流持续为正
+SBC is noncash in CFO but economically dilutive. Report cash conversion both
+before and after the chosen treatment, and model share dilution separately.
 
-低质量盈利:
-- CFO / 净利润 < 0.5（大量利润没变成现金）
-- 应收/营收比例持续上升
-- 依赖一次性收益（投资收益、资产处置）
-```
+## Returns and DuPont
 
-### 盈利质量评分卡
-
-| 指标 | 优秀(3分) | 一般(2分) | 差(1分) | 权重 |
-|------|----------|----------|---------|------|
-| CFO/净利润 | >1.2 | 0.8-1.2 | <0.8 | 25% |
-| 应收增速vs营收 | 应收增速更慢 | 同步 | 应收更快 | 20% |
-| 扣非/归母 | >90% | 70-90% | <70% | 20% |
-| 经营现金流趋势 | 连续增长 | 波动 | 下降 | 20% |
-| 存货周转 | 加快 | 稳定 | 放慢 | 15% |
-
-评分 ≥ 2.5 = 盈利质量优秀
-评分 1.5-2.5 = 需要关注
-评分 < 1.5 = 盈利质量差，建议回避
-
-## 财务造假红旗指标
-
-### 12个红旗信号
-
-| # | 红旗 | 检测方法 | 严重度 |
-|---|------|---------|--------|
-| 1 | 存贷双高 | 货币资金高 + 有息负债高（同时>营收30%） | 高 |
-| 2 | 应收暴增 | 应收增速 > 营收增速 × 1.5，持续2季+ | 高 |
-| 3 | 存货异常 | 存货/营收比例突然上升>50% | 高 |
-| 4 | 经营现金流为负 | CFO连续2年为负但净利润为正 | 高 |
-| 5 | 关联交易占比高 | 关联交易/营收 > 30% | 高 |
-| 6 | 频繁更换审计师 | 3年内换2次审计师 | 中 |
-| 7 | 在建工程不转固 | 在建工程/固定资产 > 50%，持续3年+ | 中 |
-| 8 | 预付账款异常 | 预付/营收比例突然上升 | 中 |
-| 9 | 少数股东损益异常 | 少数股东损益/净利润比例波动大 | 中 |
-| 10 | 审计意见 | 非标准无保留意见（保留/否定/无法表示） | 高 |
-| 11 | 资本化率过高 | 研发资本化/研发总额 > 50% | 中 |
-| 12 | 商誉占比高 | 商誉/净资产 > 30%，且标的业绩不达标 | 中 |
-
-### 综合造假概率评估
-
-```
-红旗数量    造假概率    建议
-0-1个       低          正常投资
-2-3个       中          深入调查，谨慎投资
-4-5个       高          建议回避
-6+个        极高        强烈回避
+```text
+ROE = net margin * asset turnover * financial leverage
+ROIC = NOPAT / average invested capital
+economic spread = ROIC - WACC
 ```
 
-## 杜邦分析
+Use average beginning/ending balance-sheet denominators where possible. Adjust
+EBIT and invested capital consistently for capitalized leases. Compare ROIC to
+the cost of capital as an output; never choose WACC merely to preserve a desired
+spread.
 
-### 三级分解
+Five-step DuPont can separate tax burden, interest burden, operating margin,
+asset turnover and leverage. For banks and insurers, use sector-specific return,
+capital and asset-quality frameworks instead of industrial-company DuPont alone.
 
-```
-ROE = 净利率 × 总资产周转率 × 权益乘数
+## Reporting-Quality Red Flags
 
-ROE = (净利润/营收) × (营收/总资产) × (总资产/净资产)
-     盈利能力        运营效率        杠杆水平
-```
+- Receivables or contract assets consistently outgrow comparable revenue.
+- Inventory growth is inconsistent with demand, capacity or write-down policy.
+- Positive earnings coexist with persistently weak CFO without an explained
+  growth-working-capital mechanism.
+- Supplier finance or factoring changes cash-flow classification.
+- Repeated one-off adjustments dominate reported earnings.
+- Capitalized costs, useful lives or reserves differ materially from peers.
+- Acquisitions obscure organic growth or recurring impairment.
+- Auditor changes, control weaknesses, restatements or going-concern language.
+- Related-party balances or transactions are material and opaque.
+- Buybacks offset SBC in dollars but not in diluted-share economics.
 
-### 五级分解
+Red flags are investigation prompts, not fraud probabilities. Do not convert a
+count of flags into a statistical fraud likelihood without a validated model.
 
-```
-ROE = 税务负担 × 利息负担 × 营业利润率 × 资产周转率 × 权益乘数
-    = (净利/税前利润) × (税前利润/EBIT) × (EBIT/营收) × (营收/总资产) × (总资产/净资产)
-```
+## Accounting Comparability
 
-### 杜邦分析模板
+Identify US GAAP, IFRS or another framework. Review differences in leases,
+development costs, inventory methods, impairment reversals, interest/dividend
+cash-flow classification, revaluation, pensions and consolidation. Preserve both
+reported and normalized views.
 
-```markdown
-### 杜邦分析: [公司名]
+When financial-statement data feeds automated peer selection, expose reported
+periods and source availability alongside the normalized metrics. Build growth
+from comparable LTM or FY periods, use average balance-sheet denominators for
+ROE/ROIC where available, normalize capex as an outflow, and keep market cap and
+enterprise value bridges internally consistent. Missing segment, gross-margin,
+working-capital or accounting-policy data must lower peer feature coverage rather
+than being imputed as economically similar.
 
-| 指标 | 2024 | 2025 | 变化 | 驱动判断 |
-|------|------|------|------|---------|
-| ROE | 15.2% | 17.8% | +2.6% | ↑ |
-| 净利率 | 8.5% | 9.2% | +0.7% | 盈利改善 ✓ |
-| 资产周转率 | 0.85 | 0.88 | +0.03 | 效率提升 ✓ |
-| 权益乘数 | 2.10 | 2.20 | +0.10 | 杠杆上升 ⚠️ |
+## Output
 
-结论: ROE提升主要由盈利能力改善驱动，杠杆小幅上升需关注
-```
-
-### 行业ROE对比
-
-| 行业 | 典型ROE | 驱动类型 |
-|------|---------|---------|
-| 白酒 | 25-30% | 高净利率驱动（毛利率>90%） |
-| 零售 | 8-15% | 高周转驱动（薄利多销） |
-| 银行 | 10-14% | 高杠杆驱动（权益乘数>10x） |
-| 科技 | 12-20% | 高净利率+中等周转 |
-| 地产 | 5-10% | 高杠杆但在去杠杆 |
-
-## 输出格式
-
-```markdown
-## 财务分析: [公司名/代码]
-
-### 三表概要
-| 指标 | 2023A | 2024A | 2025E | 趋势 |
-|------|-------|-------|-------|------|
-| 营收(亿) | ... | ... | ... | ... |
-| 净利润(亿) | ... | ... | ... | ... |
-| CFO(亿) | ... | ... | ... | ... |
-| 资产负债率 | ... | ... | ... | ... |
-
-### 盈利质量评分
-| 指标 | 得分 | 说明 |
-|------|------|------|
-| CFO/净利润 | 3/3 | 1.25, 现金回收优秀 |
-| ... | ... | ... |
-| **综合** | **2.7/3** | **盈利质量优秀** |
-
-### 杜邦分解
-[杜邦分析表格]
-
-### 红旗检查
-- [x] 存贷双高 → 否，货币资金合理
-- [x] 应收异常 → 否，增速低于营收
-- [!] 商誉占比 → 22%，接近警戒线，需关注
-
-### 结论
-...
-```
-
-## 注意事项
-
-1. **财报会计准则差异**：A股用中国会计准则，港股/美股用IFRS/US GAAP，比较时注意调整
-2. **季度数据看同比非环比**：季节性因素大（如消费Q4旺季），环比波动不代表趋势
-3. **银行/保险特殊**：三表结构与一般企业完全不同，不适用传统勾稽分析
-4. **重资产 vs 轻资产**：资产周转率跨行业不可比，同行业内比较才有意义
-5. **并表范围变化**：新收购/处置子公司导致同比不可比，需看可比口径
-6. **数据来源**：tushare提供A股财报数据，extra_fields中可获取pe/pb/roe等指标
+1. Cutoff date, source filings, accounting basis, currency and units.
+2. Reconciled LTM income, balance-sheet and cash-flow summary.
+3. Revenue, margin, working-capital and capital-allocation drivers.
+4. Earnings-quality and cash-conversion analysis.
+5. ROIC, ROE/DuPont and leverage analysis.
+6. Normalizations with reported-to-adjusted bridges.
+7. Red flags, missing data and questions requiring note-level review.
+8. Valuation implications without turning accounting ratios directly into a
+   buy/sell recommendation.

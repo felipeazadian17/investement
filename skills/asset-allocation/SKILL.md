@@ -1,7 +1,6 @@
 ---
 name: asset-allocation
 description: Asset allocation theory and optimizer usage — MPT / Black-Litterman / risk budgeting / all-weather strategy, including guides for 5 optimizers and rebalancing rules.
-category: asset-class
 ---
 
 # Asset Allocation and Portfolio Optimization
@@ -9,6 +8,24 @@ category: asset-class
 ## Overview
 
 From asset allocation theory to practical implementation, this skill covers classical frameworks (MPT, BL, risk budgeting, all-weather) and the usage of the four optimizers built into this system. The output can be written directly into `config.json`.
+
+## Investement Project Contract
+
+For this repository, read
+`../../investigacion/auditoria_portfolio_riesgo_gobernanza.md` first. The local
+baseline is constrained inverse volatility, not an automatically chosen
+"optimal" model. Always compare against `1/N` and no rebalance. PyPortfolioOpt
+minimum variance uses Ledoit-Wolf covariance; Riskfolio remains optional.
+
+Use aligned daily returns, warn below 60 observations and prefer at least 252.
+Apply profile caps by asset, sector, country, asset class and currency. If the
+profile volatility limit is breached, scale risky assets into cash. Report 95%
+historical VaR/Expected Shortfall, drawdown, risk contributions, effective number
+of assets and turnover. Rebalance only outside the configured absolute/relative
+band, except mandatory exits.
+
+The parameters elsewhere in this imported skill are research candidates. They
+do not override the tested local contract or the investor profile.
 
 ## Asset Allocation Theory
 

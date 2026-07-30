@@ -35,6 +35,10 @@ class DataAgent:
         )
         self._clock = clock
 
+    @property
+    def market_data_provider(self) -> MarketDataProvider:
+        return self._market_data
+
     def collect(self, request: AssetDataRequest) -> AssetDataSnapshot:
         symbol = normalize_symbol(request.symbol)
         end = min(request.end, request.as_of.date())

@@ -49,6 +49,28 @@ class OrchestrationTests(unittest.TestCase):
         )
         self.assertEqual(decision.action, SignalAction.HOLD)
         self.assertEqual(decision.risk_vetoed_by, ("risk",))
+        self.assertEqual(decision.effective_weights["risk"], 0.0)
+
+    def test_committee_uses_explicit_factor_weights(self):
+        decision = InvestmentCommittee().decide(
+            (
+                finding("fundamental", 0.7),
+                finding("relative-valuation", 0.5),
+                finding("technical", 0.1),
+                finding("risk", 0.0),
+            )
+        )
+
+        self.assertAlmostEqual(sum(decision.effective_weights.values()), 1.0)
+        self.assertEqual(decision.effective_weights["fundamental"], 0.55)
+        self.assertEqual(decision.effective_weights["technical"], 0.20)
+        self.assertEqual(decision.effective_weights["risk"], 0.0)
+
+    def test_committee_rejects_duplicate_agent_votes(self):
+        with self.assertRaisesRegex(ValueError, "unique agents"):
+            InvestmentCommittee().decide(
+                (finding("fundamental", 0.5), finding("fundamental", 0.6))
+            )
 
     def test_workflow_resolves_dependencies_and_audits_hash_chain(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -76,6 +98,29 @@ class OrchestrationTests(unittest.TestCase):
             event["payload"]["value"] = 2
             path.write_text(json.dumps(event) + "\n", encoding="utf-8")
             self.assertFalse(audit.verify())
+
+    def test_core_audit_log_redacts_credentials_without_the_auditor_facade(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            audit = JsonlAuditLog(Path(temporary) / "events.jsonl")
+            audit.append(
+                "run-1",
+                "broker.failed",
+                {"consumerKey": "private", "nested": {"clientId": "also-private"}},
+            )
+
+            payload = audit.read()[0].payload
+
+        self.assertEqual(payload["consumerKey"], "[REDACTED]")
+        self.assertEqual(payload["nested"]["clientId"], "[REDACTED]")
+
+    def test_workflow_rejects_dependency_cycles_before_execution(self):
+        with self.assertRaisesRegex(ValueError, "dependency cycle"):
+            WorkflowEngine(
+                (
+                    WorkflowStep("first", lambda context: None, ("second",)),
+                    WorkflowStep("second", lambda context: None, ("first",)),
+                )
+            )
 
     def test_memory_store_is_atomic_and_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temporary:

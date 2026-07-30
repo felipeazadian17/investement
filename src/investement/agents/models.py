@@ -18,8 +18,14 @@ from investement.domain import (
 from investement.orchestration import AgentFinding, CommitteeDecision, EvidenceReference
 from investement.portfolio import AllocationResult, AssetMetadata, PortfolioConstraints
 from investement.valuation import (
+    CapitalCostResult,
     ComparableObservation,
     DCFResult,
+    LTMFundamentals,
+    OperatingProjection,
+    PeerProfile,
+    PeerSelectionConfig,
+    PeerSelectionResult,
     RelativeValuationResult,
     ValuationSignal,
 )
@@ -42,6 +48,20 @@ class InvestmentExperience(str, Enum):
     INTERMEDIATE = "intermediate"
     ADVANCED = "advanced"
     EXPERT = "expert"
+
+
+class TechnicalRegime(str, Enum):
+    BULLISH = "bullish"
+    NEUTRAL = "neutral"
+    BEARISH = "bearish"
+
+
+class TechnicalTimingAction(str, Enum):
+    FAVOR_ENTRY = "favor_entry"
+    HOLD = "hold"
+    WAIT = "wait"
+    TIGHTEN_RISK = "tighten_risk"
+    FAVOR_EXIT = "favor_exit"
 
 
 class LeveragePolicy(str, Enum):
@@ -105,6 +125,8 @@ class InvestorProfileRequest:
     prohibited_countries: Sequence[str] = ()
     sector_max_weights: Mapping[str, float] = field(default_factory=dict)
     country_max_weights: Mapping[str, float] = field(default_factory=dict)
+    asset_class_max_weights: Mapping[str, float] = field(default_factory=dict)
+    currency_max_weights: Mapping[str, float] = field(default_factory=dict)
     age: int | None = None
     residence_country: str | None = None
     tax_residency: str | None = None
@@ -156,7 +178,12 @@ class InvestorProfileRequest:
             raise ValueError("max_asset_drawdown must be between zero and one")
         if not isfinite(self.minimum_daily_dollar_volume) or self.minimum_daily_dollar_volume < 0:
             raise ValueError("minimum_daily_dollar_volume cannot be negative")
-        for limits in (self.sector_max_weights, self.country_max_weights):
+        for limits in (
+            self.sector_max_weights,
+            self.country_max_weights,
+            self.asset_class_max_weights,
+            self.currency_max_weights,
+        ):
             if any(not isfinite(value) or not 0 <= value <= 1 for value in limits.values()):
                 raise ValueError("group weight limits must be between 0 and 1")
         if self.age is not None and not 18 <= self.age <= 120:
@@ -205,6 +232,8 @@ class InvestorProfile:
     prohibited_countries: frozenset[str]
     sector_max_weights: Mapping[str, float]
     country_max_weights: Mapping[str, float]
+    asset_class_max_weights: Mapping[str, float]
+    currency_max_weights: Mapping[str, float]
     age: int | None
     residence_country: str | None
     tax_residency: str | None
@@ -234,6 +263,9 @@ class InvestorProfile:
             asset_max_weights=dict(asset_max_weights or {}),
             sector_max_weights=dict(self.sector_max_weights),
             country_max_weights=dict(self.country_max_weights),
+            asset_class_max_weights=dict(self.asset_class_max_weights),
+            currency_max_weights=dict(self.currency_max_weights),
+            max_annual_volatility=self.max_portfolio_annual_volatility,
         )
 
 
@@ -245,7 +277,7 @@ class AssetDataRequest:
     as_of: datetime
     interval: str = "1d"
     filing_forms: Sequence[str] = ("10-K", "10-Q")
-    filing_limit: int = 4
+    filing_limit: int = 8
     include_fundamentals: bool = True
     include_fund_data: bool = False
     option_expiration: date | None = None
@@ -300,45 +332,45 @@ class AssetDataSnapshot:
 
 
 @dataclass(frozen=True)
-class FundamentalModelInputs:
-    base_free_cash_flow: float
-    growth_rates: Sequence[float]
-    discount_rate: float
-    terminal_growth_rate: float
-    net_debt: float
-    diluted_shares: float
-    roic: float | None = None
-    revenue_growth: float | None = None
-    operating_margin: float | None = None
-    debt_to_free_cash_flow: float | None = None
-
-    def __post_init__(self) -> None:
-        values = (
-            self.base_free_cash_flow,
-            self.discount_rate,
-            self.terminal_growth_rate,
-            self.net_debt,
-            self.diluted_shares,
-            *self.growth_rates,
-        )
-        if not self.growth_rates or any(not isfinite(float(value)) for value in values):
-            raise ValueError("fundamental model inputs must be finite")
-        for optional in (
-            self.roic,
-            self.revenue_growth,
-            self.operating_margin,
-            self.debt_to_free_cash_flow,
-        ):
-            if optional is not None and not isfinite(optional):
-                raise ValueError("optional quality metrics must be finite")
-
-
-@dataclass(frozen=True)
 class FundamentalAnalysis:
     dcf: DCFResult
     projected_free_cash_flows: Sequence[float]
     quality_score: float
     finding: AgentFinding
+    ltm: LTMFundamentals | None = None
+    capital_cost: CapitalCostResult | None = None
+    projection: OperatingProjection | None = None
+    sensitivity: Mapping[float, Mapping[float, float | None]] = field(default_factory=dict)
+    model_assumptions: Mapping[str, float | str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TechnicalTimingSignal:
+    action: TechnicalTimingAction
+    strength: float
+    confidence: float
+    observed_at: datetime
+    valid_for_bars: int
+    execute_on_next_bar: bool
+    reasons: Sequence[str]
+    invalidation_conditions: Sequence[str]
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.strength) or not -1 <= self.strength <= 1:
+            raise ValueError("technical timing strength must be between -1 and 1")
+        if not isfinite(self.confidence) or not 0 <= self.confidence <= 1:
+            raise ValueError("technical timing confidence must be between zero and one")
+        require_aware(self.observed_at, "technical timing observed_at")
+        if self.valid_for_bars <= 0:
+            raise ValueError("technical timing validity must be positive")
+        if not self.execute_on_next_bar:
+            raise ValueError("technical timing cannot execute on the observation bar")
+        if not self.reasons or any(not item.strip() for item in self.reasons):
+            raise ValueError("technical timing requires non-empty reasons")
+        if not self.invalidation_conditions or any(
+            not item.strip() for item in self.invalidation_conditions
+        ):
+            raise ValueError("technical timing requires non-empty invalidation conditions")
 
 
 @dataclass(frozen=True)
@@ -346,11 +378,19 @@ class TechnicalAnalysis:
     short_moving_average: float
     long_moving_average: float
     momentum: float
+    medium_momentum: float
     rsi: float
     macd: float
     macd_signal: float
+    macd_histogram: float
+    normalized_atr: float
+    volume_ratio: float | None
     annual_volatility: float
     max_drawdown: float
+    current_drawdown: float
+    trend_regime: TechnicalRegime
+    timing: TechnicalTimingSignal
+    parameters: Mapping[str, float | int]
     finding: AgentFinding
 
 
@@ -359,6 +399,9 @@ class RelativeValuationInputs:
     target_metric_value: float
     metric: str
     comparables: Sequence[ComparableObservation]
+    target_peer_profile: PeerProfile | None = None
+    peer_selection_config: PeerSelectionConfig = field(default_factory=PeerSelectionConfig)
+    enterprise_to_equity_adjustment_per_share: float | None = None
     dcf_weight: float = 0.60
     required_margin: float = 0.20
     sell_premium: float = 0.20
@@ -368,6 +411,14 @@ class RelativeValuationInputs:
             raise ValueError("target_metric_value must be positive")
         if not self.metric.strip() or not self.comparables:
             raise ValueError("metric and comparable observations are required")
+        if self.target_peer_profile is not None and any(
+            item.profile is None for item in self.comparables
+        ):
+            raise ValueError("automatic peer selection requires a profile for every candidate")
+        if self.enterprise_to_equity_adjustment_per_share is not None and not isfinite(
+            self.enterprise_to_equity_adjustment_per_share
+        ):
+            raise ValueError("enterprise-to-equity adjustment must be finite")
         for value, name in (
             (self.dcf_weight, "dcf_weight"),
             (self.required_margin, "required_margin"),
@@ -383,6 +434,8 @@ class RelativeValuationAnalysis:
     blended_fair_value: float
     signal: ValuationSignal
     finding: AgentFinding
+    peer_selection: PeerSelectionResult | None = None
+    comparable_signal: ValuationSignal | None = None
 
 
 @dataclass(frozen=True)
@@ -400,6 +453,7 @@ class PortfolioPlan:
     rebalances: Sequence[RebalanceInstruction]
     eligible_assets: Sequence[str]
     excluded_assets: Mapping[str, str]
+    implementation_turnover: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -409,6 +463,7 @@ class RiskAssessment:
     breaches: Sequence[str]
     metrics: Mapping[str, float]
     finding: AgentFinding
+    warnings: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -474,7 +529,6 @@ class AuditReceipt:
 class AssetAnalysisRequest:
     profile: InvestorProfile
     data: AssetDataRequest
-    fundamentals: FundamentalModelInputs
     relative_valuation: RelativeValuationInputs
     proposed_weight: float = 0.0
 
@@ -503,4 +557,15 @@ class PortfolioConstructionInputs:
     metadata: Mapping[str, AssetMetadata] = field(default_factory=dict)
     current_weights: Mapping[str, float] = field(default_factory=dict)
     decisions: Mapping[str, CommitteeDecision] = field(default_factory=dict)
+    return_dates: Sequence[date] = ()
     backend: str = "inverse_volatility"
+    absolute_rebalance_band: float = 0.01
+    relative_rebalance_band: float = 0.20
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.absolute_rebalance_band, "absolute_rebalance_band"),
+            (self.relative_rebalance_band, "relative_rebalance_band"),
+        ):
+            if not isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between zero and one")

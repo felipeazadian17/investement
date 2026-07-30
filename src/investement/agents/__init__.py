@@ -11,7 +11,6 @@ from .models import (
     BrokerAwarePortfolioRecommendation,
     BrokerPortfolioState,
     FundamentalAnalysis,
-    FundamentalModelInputs,
     IncomeStability,
     InvestmentExperience,
     InvestorProfile,
@@ -28,6 +27,9 @@ from .models import (
     RiskTolerance,
     TaxPolicy,
     TechnicalAnalysis,
+    TechnicalRegime,
+    TechnicalTimingAction,
+    TechnicalTimingSignal,
 )
 from .pipeline import InvestmentAgentPipeline
 from .portfolio import PortfolioConstructionAgent
@@ -35,7 +37,7 @@ from .profile import InvestorProfileAgent
 from .relative_valuation import RelativeValuationAgent
 from .risk import RiskAgent
 from .snaptrade import SnapTradeBrokerAgent
-from .technical import TechnicalAgent
+from .technical import TechnicalAgent, TechnicalParameters
 
 __all__ = [
     "AssetAnalysisReport",
@@ -50,7 +52,6 @@ __all__ = [
     "DataAgent",
     "FundamentalAgent",
     "FundamentalAnalysis",
-    "FundamentalModelInputs",
     "IncomeStability",
     "InvestmentAgentPipeline",
     "InvestmentExperience",
@@ -74,4 +75,8 @@ __all__ = [
     "TaxPolicy",
     "TechnicalAgent",
     "TechnicalAnalysis",
+    "TechnicalParameters",
+    "TechnicalRegime",
+    "TechnicalTimingAction",
+    "TechnicalTimingSignal",
 ]

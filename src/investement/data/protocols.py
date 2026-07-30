@@ -37,7 +37,7 @@ class FundamentalDataProvider(Protocol):
         self,
         symbol: str,
         forms: Sequence[str],
-        limit: int = 4,
+        limit: int = 8,
         filed_after: date | None = None,
         available_before: datetime | None = None,
     ) -> Sequence[FundamentalSnapshot]: ...

@@ -13,7 +13,6 @@ from investement.agents import (
     BrokerPortfolioState,
     DataAgent,
     FundamentalAgent,
-    FundamentalModelInputs,
     InvestmentAgentPipeline,
     InvestmentExperience,
     InvestorProfileAgent,
@@ -28,7 +27,14 @@ from investement.agents import (
     TaxPolicy,
     TechnicalAgent,
 )
-from investement.domain import CorporateActionKind, DataProvenance, PriceBar, SignalAction
+from investement.agents.portfolio import _rebalance_instructions
+from investement.domain import (
+    CorporateActionKind,
+    DataProvenance,
+    FundamentalSnapshot,
+    PriceBar,
+    SignalAction,
+)
 from investement.orchestration import (
     AgentFinding,
     CommitteeDecision,
@@ -37,7 +43,15 @@ from investement.orchestration import (
     JsonMemoryStore,
 )
 from investement.portfolio import AssetMetadata
-from investement.valuation import ComparableObservation
+from investement.valuation import (
+    ComparableObservation,
+    CreditSpreadObservation,
+    FixedCreditSpreadProvider,
+    FixedMarketRateProvider,
+    MarketRateObservation,
+    MarketWACCBuilder,
+    PeerProfile,
+)
 
 
 class FakeMarketDataProvider:
@@ -69,6 +83,16 @@ class FakeFilingProvider:
     ):
         self.calls.append((symbol, forms, limit, filed_after, available_before))
         return self.filings[:limit]
+
+
+class FakeFundamentalProvider:
+    name = "fake-fundamentals"
+
+    def __init__(self, fundamentals):
+        self.fundamentals = fundamentals
+
+    def latest_fundamentals(self, symbol, forms, limit=8, **kwargs):
+        return self.fundamentals[:limit]
 
 
 class FakePortfolioStateBroker:
@@ -240,7 +264,7 @@ class AgentTests(unittest.TestCase):
 
     def test_analyst_agents_produce_compatible_structured_findings(self):
         snapshot = _snapshot()
-        fundamentals = FundamentalAgent().analyze(snapshot, _fundamental_inputs())
+        fundamentals = _fundamental_agent(FakeMarketDataProvider(snapshot.bars)).analyze(snapshot)
         technical = TechnicalAgent().analyze(snapshot)
         relative = RelativeValuationAgent().analyze(
             snapshot,
@@ -251,9 +275,48 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(technical.finding.subject, "AAPL")
         self.assertEqual(relative.finding.subject, "AAPL")
         self.assertGreater(fundamentals.dcf.value_per_share, 0)
+        self.assertAlmostEqual(
+            fundamentals.model_assumptions["initial_revenue_growth"],
+            0.10,
+        )
         self.assertGreaterEqual(technical.rsi, 0)
         self.assertLessEqual(technical.rsi, 100)
         self.assertEqual(relative.signal.action, SignalAction.BUY)
+        self.assertIsNotNone(relative.comparable_signal)
+        self.assertIn("Comparable fair value", relative.finding.thesis)
+
+    def test_relative_valuation_agent_selects_peers_from_candidate_universe(self):
+        snapshot = _snapshot()
+        fundamentals = _fundamental_agent(FakeMarketDataProvider(snapshot.bars)).analyze(snapshot)
+        target = _peer_profile("AAPL")
+        candidates = tuple(
+            ComparableObservation(
+                symbol,
+                multiple,
+                "P/FCF",
+                replace(target, symbol=symbol),
+            )
+            for symbol, multiple in (
+                ("B", 12.0),
+                ("C", 13.0),
+                ("D", 14.0),
+                ("E", 15.0),
+                ("F", 16.0),
+            )
+        )
+        relative = RelativeValuationAgent().analyze(
+            snapshot,
+            fundamentals,
+            RelativeValuationInputs(
+                target_metric_value=2.0,
+                metric="P/FCF",
+                comparables=candidates,
+                target_peer_profile=target,
+            ),
+        )
+        self.assertIsNotNone(relative.peer_selection)
+        self.assertEqual(len(relative.peer_selection.selected), 5)
+        self.assertFalse(any("supplied manually" in risk for risk in relative.finding.risks))
 
     def test_risk_agent_vetoes_an_asset_that_breaches_profile(self):
         snapshot = _snapshot()
@@ -270,6 +333,30 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(assessment.approved)
         self.assertTrue(assessment.finding.risk_veto)
         self.assertGreaterEqual(len(assessment.breaches), 2)
+
+    def test_risk_approval_is_directionally_neutral(self):
+        snapshot = _snapshot()
+        technical = TechnicalAgent().analyze(snapshot)
+        profile = _profile_agent().create(_profile_request())
+
+        assessment = RiskAgent().assess_asset(profile, snapshot, technical, 0.05)
+
+        self.assertTrue(assessment.approved)
+        self.assertEqual(assessment.finding.score, 0.0)
+
+    def test_rebalance_band_suppresses_small_trades_but_not_mandatory_exits(self):
+        instructions = _rebalance_instructions(
+            {"A": 0.31, "B": 0.0},
+            {"A": 0.30, "B": 0.02},
+            absolute_band=0.02,
+            relative_band=0.20,
+            mandatory_exits={"B"},
+        )
+        indexed = {item.symbol: item for item in instructions}
+
+        self.assertEqual(indexed["A"].action, SignalAction.HOLD)
+        self.assertEqual(indexed["A"].change, 0.0)
+        self.assertEqual(indexed["B"].action, SignalAction.SELL)
 
     def test_portfolio_agent_applies_profile_and_committee_exclusions(self):
         profile = _profile_agent().create(
@@ -328,7 +415,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(stored.value["as_of"], "2024-01-01T00:00:00+00:00")
 
     def test_pipeline_runs_profile_through_committee_and_audit(self):
-        bars = _bars(90)
+        bars = _bars(260, daily_step=0.034)
         as_of = bars[-1].timestamp
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -339,9 +426,11 @@ class AgentTests(unittest.TestCase):
             pipeline = InvestmentAgentPipeline(
                 DataAgent(
                     FakeMarketDataProvider(bars),
+                    fundamentals=FakeFundamentalProvider(_fundamental_snapshots()),
                     clock=lambda: datetime(2025, 1, 1, tzinfo=UTC),
                 ),
                 auditor=auditor,
+                fundamental_agent=_fundamental_agent(FakeMarketDataProvider(bars)),
             )
             profile = pipeline.create_profile(
                 _profile_request(max_position_weight=0.60, max_annual_volatility=1.0)
@@ -355,7 +444,6 @@ class AgentTests(unittest.TestCase):
                         end=as_of.date(),
                         as_of=as_of,
                     ),
-                    fundamentals=_fundamental_inputs(),
                     relative_valuation=_relative_inputs(),
                     proposed_weight=0.20,
                 ),
@@ -448,13 +536,13 @@ def _profile_request(**overrides) -> InvestorProfileRequest:
     return InvestorProfileRequest(**values)
 
 
-def _bars(count: int) -> tuple[PriceBar, ...]:
+def _bars(count: int, daily_step: float = 0.10) -> tuple[PriceBar, ...]:
     start = datetime(2024, 1, 1, tzinfo=UTC)
     retrieved = datetime(2025, 1, 1, tzinfo=UTC)
     bars = []
     for index in range(count):
         timestamp = start + timedelta(days=index)
-        close = 10.0 + index * 0.10 + (0.05 if index % 2 else -0.03)
+        close = 10.0 + index * daily_step + (0.05 if index % 2 else -0.03)
         bars.append(
             PriceBar(
                 symbol="AAPL",
@@ -478,9 +566,10 @@ def _bars(count: int) -> tuple[PriceBar, ...]:
 
 
 def _snapshot():
-    bars = _bars(90)
+    bars = _bars(260, daily_step=0.034)
     return DataAgent(
         FakeMarketDataProvider(bars),
+        fundamentals=FakeFundamentalProvider(_fundamental_snapshots()),
         clock=lambda: datetime(2025, 1, 1, tzinfo=UTC),
     ).collect(
         AssetDataRequest(
@@ -506,18 +595,72 @@ def _filing(form: str, available_at: datetime):
     )
 
 
-def _fundamental_inputs() -> FundamentalModelInputs:
-    return FundamentalModelInputs(
-        base_free_cash_flow=20.0,
-        growth_rates=(0.08, 0.07, 0.06, 0.05, 0.04),
-        discount_rate=0.10,
-        terminal_growth_rate=0.025,
-        net_debt=5.0,
-        diluted_shares=10.0,
-        roic=0.18,
-        revenue_growth=0.09,
-        operating_margin=0.22,
-        debt_to_free_cash_flow=1.5,
+def _fundamental_snapshots() -> tuple[FundamentalSnapshot, ...]:
+    retrieved_at = datetime(2024, 3, 30, tzinfo=UTC)
+
+    def annual(year, revenue, ebit, available_at):
+        return FundamentalSnapshot(
+            symbol="AAPL",
+            period_start=date(year, 1, 1),
+            period_end=date(year, 12, 31),
+            period_basis="fiscal-year",
+            filing_type="10-K",
+            currency="USD",
+            revenue=revenue,
+            ebit=ebit,
+            operating_cash_flow=25.0,
+            capital_expenditure=5.0,
+            cash_and_equivalents=20.0,
+            total_debt=15.0,
+            diluted_shares=10.0,
+            current_shares_outstanding=9.8,
+            net_income=15.0,
+            pretax_income=20.0,
+            income_tax_expense=4.2,
+            interest_expense=1.0,
+            short_term_investments=3.0,
+            long_term_investments=2.0,
+            operating_lease_liabilities=1.0,
+            total_equity=80.0,
+            total_assets=130.0,
+            provenance=DataProvenance(
+                source="sec-edgar-xbrl",
+                retrieved_at=retrieved_at,
+                available_at=available_at,
+                raw_reference=f"fixture://10-k/{year}",
+                metadata={"accession_number": f"10-k-{year}", "company_sic": "3571"},
+            ),
+        )
+
+    return (
+        annual(2023, 110.0, 24.0, datetime(2024, 2, 1, tzinfo=UTC)),
+        annual(2022, 100.0, 20.0, datetime(2023, 2, 1, tzinfo=UTC)),
+    )
+
+
+def _fundamental_agent(market_data) -> FundamentalAgent:
+    rates = FixedMarketRateProvider(
+        MarketRateObservation(
+            observed_at=date(2024, 1, 1),
+            risk_free_rate=0.04,
+            equity_risk_premium=0.05,
+            source_url="fixture://market-rates",
+        )
+    )
+    spreads = FixedCreditSpreadProvider(
+        CreditSpreadObservation(
+            observed_at=date(2024, 1, 1),
+            thresholds=((float("inf"), 0.01),),
+            source_url="fixture://credit-spreads",
+        )
+    )
+    return FundamentalAgent(
+        MarketWACCBuilder(
+            market_data,
+            rate_provider=rates,
+            minimum_beta_observations=2,
+            credit_spread_provider=spreads,
+        )
     )
 
 
@@ -532,6 +675,23 @@ def _relative_inputs() -> RelativeValuationInputs:
             ComparableObservation("OUTLIER", 100.0, "P/FCF"),
         ),
         required_margin=0.15,
+    )
+
+
+def _peer_profile(symbol: str) -> PeerProfile:
+    return PeerProfile(
+        symbol=symbol,
+        company_type="operating-company",
+        sector="Information Technology",
+        industry="Technology Hardware",
+        lifecycle="mature",
+        metrics={
+            "revenue_growth": 0.08,
+            "ebit_margin": 0.28,
+            "capex_to_revenue": 0.04,
+            "revenue": 100_000.0,
+            "beta": 1.0,
+        },
     )
 
 

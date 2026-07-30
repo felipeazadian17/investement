@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 SNAPTRADE_BASE_URL = "https://api.snaptrade.com/api/v1"
 
@@ -57,12 +57,30 @@ class ReadOnlySnapTradeClient:
         clock: Callable[[], float] = time.time,
         base_url: str = SNAPTRADE_BASE_URL,
         timeout: float = 30.0,
+        max_rate_limit_retries: int = 2,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
+        parsed_url = urlparse(base_url)
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname != "api.snaptrade.com"
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.query
+            or parsed_url.fragment
+        ):
+            raise ValueError("SnapTrade base_url must be https://api.snaptrade.com")
+        if not 0 < timeout <= 120:
+            raise ValueError("SnapTrade timeout must be between zero and 120 seconds")
+        if not 0 <= max_rate_limit_retries <= 5:
+            raise ValueError("max_rate_limit_retries must be between zero and five")
         self.__credentials = credentials
         self.__transport = transport or _httpx_client()
         self.__clock = clock
         self.__base_url = base_url.rstrip("/")
         self.__timeout = timeout
+        self.__max_rate_limit_retries = max_rate_limit_retries
+        self.__sleeper = sleeper
 
     def accounts(self) -> Sequence[Mapping[str, Any]]:
         payload = self._get("/accounts")
@@ -95,22 +113,30 @@ class ReadOnlySnapTradeClient:
 
     def _get(self, resource: str) -> Any:
         path = f"/api/v1{resource}"
-        query = urlencode(
-            {
-                "clientId": self.__credentials.client_id,
-                "timestamp": int(self.__clock()),
-            }
-        )
-        signature = sign_snaptrade_request(
-            path=path,
-            query=query,
-            consumer_key=self.__credentials.consumer_key,
-        )
-        response = self.__transport.get(
-            f"{self.__base_url}{resource}?{query}",
-            headers={"Accept": "application/json", "Signature": signature},
-            timeout=self.__timeout,
-        )
+        response = None
+        for attempt in range(self.__max_rate_limit_retries + 1):
+            query = urlencode(
+                {
+                    "clientId": self.__credentials.client_id,
+                    "timestamp": int(self.__clock()),
+                }
+            )
+            signature = sign_snaptrade_request(
+                path=path,
+                query=query,
+                consumer_key=self.__credentials.consumer_key,
+            )
+            response = self.__transport.get(
+                f"{self.__base_url}{resource}?{query}",
+                headers={"Accept": "application/json", "Signature": signature},
+                timeout=self.__timeout,
+            )
+            if int(getattr(response, "status_code", 0)) != 429:
+                break
+            if attempt < self.__max_rate_limit_retries:
+                self.__sleeper(_retry_delay(response, attempt))
+        if response is None:
+            raise RuntimeError("SnapTrade request produced no response")
         try:
             response.raise_for_status()
         except Exception as exc:
@@ -184,3 +210,20 @@ def _response_error(response: Any, resource: str) -> SnapTradeAPIError:
         error_code=error_code,
         request_id=str(request_id) if request_id else None,
     )
+
+
+def _retry_delay(response: Any, attempt: int) -> float:
+    headers = getattr(response, "headers", {})
+    if isinstance(headers, Mapping):
+        for name in (
+            "x-ratelimit-account-reset",
+            "x-ratelimit-reset",
+            "retry-after",
+        ):
+            value = headers.get(name) or headers.get(name.title())
+            try:
+                if value is not None:
+                    return min(max(float(value), 0.0), 60.0)
+            except (TypeError, ValueError):
+                pass
+    return min(2.0**attempt, 60.0)

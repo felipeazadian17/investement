@@ -1,7 +1,6 @@
 ---
 name: execution-model
 description: Trade execution modeling (backtest only) — slippage formulas (linear / square-root impact), VWAP/TWAP execution logic, market-impact cost estimation, and execution-assumption configuration.
-category: strategy
 ---
 
 # Trade Execution Modeling
@@ -9,6 +8,17 @@ category: strategy
 ## Overview
 
 Provide more realistic execution assumptions for backtests, including slippage models, market-impact estimation, and execution-algorithm principles. This skill is for backtest simulation only and does not involve live order execution.
+
+## Investement Project Contract
+
+This project remains recommendation and read-only. A signal observed on bar `t`
+can first execute on `t+1`. Portfolio rebalancing uses no-trade bands and reports
+turnover; backtests must apply commissions, spread, slippage and taxes. Parameters
+in market tables below are examples to calibrate, not defaults for Schwab.
+
+Before changing broker or audit behavior, read
+`../../investigacion/auditoria_agentes_operativos.md`. Do not add live order
+methods to the SnapTrade Personal client.
 
 ## Slippage Models
 

@@ -1,10 +1,17 @@
 ---
 name: backtest-diagnose
 description: Diagnose failed or underperforming backtests, locate the root cause, and fix the issue
-category: tool
 ---
 
 # Backtest Diagnosis
+
+## Investement Project Usage
+
+Portfolio and risk changes must be compared walk-forward against `1/N`, inverse
+volatility, no timing and no rebalance. Report costs, turnover, Expected
+Shortfall, drawdown, effective assets and stability by regime. Read
+`../../investigacion/auditoria_portfolio_riesgo_gobernanza.md` before promoting
+an optimizer, committee weight or rebalancing band.
 
 ## Overview
 

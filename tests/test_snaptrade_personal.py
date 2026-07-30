@@ -170,6 +170,43 @@ class SnapTradePersonalTests(unittest.TestCase):
         self.assertNotIn("client-private", rendered)
         self.assertNotIn("consumer-private", rendered)
 
+    def test_rate_limit_retries_use_server_reset_header(self):
+        class ThrottledTransport:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, url, *, headers, timeout):
+                self.calls += 1
+                if self.calls == 1:
+                    return FakeResponse(
+                        {"code": "0000"},
+                        status_code=429,
+                        headers={"x-ratelimit-reset": "0.25"},
+                    )
+                return FakeResponse([])
+
+        transport = ThrottledTransport()
+        sleeps = []
+        client = ReadOnlySnapTradeClient(
+            SnapTradePersonalCredentials("client", "consumer"),
+            transport=transport,
+            clock=lambda: 123,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(client.accounts(), ())
+        self.assertEqual(transport.calls, 2)
+        self.assertEqual(sleeps, [0.25])
+
+    def test_client_rejects_non_snaptrade_or_insecure_base_urls(self):
+        for base_url in ("http://api.snaptrade.com/api/v1", "https://example.com/api/v1"):
+            with self.subTest(base_url=base_url), self.assertRaises(ValueError):
+                ReadOnlySnapTradeClient(
+                    SnapTradePersonalCredentials("client", "consumer"),
+                    transport=FakeTransport(),
+                    base_url=base_url,
+                )
+
     @patch("investement.cli.snaptrade_connect.write_password")
     def test_keychain_write_uses_native_api(self, write_password):
         _keychain_write("service-name", "private-value")

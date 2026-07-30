@@ -103,10 +103,18 @@ class InvestorProfileAgent:
                 item.strip().casefold() for item in request.prohibited_countries if item.strip()
             ),
             sector_max_weights={
-                key.strip(): value for key, value in request.sector_max_weights.items()
+                key.strip().casefold(): value for key, value in request.sector_max_weights.items()
             },
             country_max_weights={
-                key.strip(): value for key, value in request.country_max_weights.items()
+                key.strip().casefold(): value for key, value in request.country_max_weights.items()
+            },
+            asset_class_max_weights={
+                key.strip().casefold(): value
+                for key, value in request.asset_class_max_weights.items()
+            },
+            currency_max_weights={
+                key.strip().casefold(): value
+                for key, value in request.currency_max_weights.items()
             },
             age=request.age,
             residence_country=_country(request.residence_country),

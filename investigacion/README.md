@@ -389,6 +389,20 @@ Fuentes externas
 6. Crear un adaptador de SnapTrade Personal estrictamente read-only, con secretos
    fuera del repositorio y sin habilitar ordenes.
 
+## Auditorias metodologicas vigentes
+
+- [`auditoria_modelo_dcf.md`](auditoria_modelo_dcf.md): LTM XBRL, FCFF, WACC,
+  convergencia, terminal, puente a equity y sensibilidad.
+- [`auditoria_modelo_tecnico.md`](auditoria_modelo_tecnico.md): parametros,
+  regimenes y timing causal no vinculante.
+- [`auditoria_portfolio_riesgo_gobernanza.md`](auditoria_portfolio_riesgo_gobernanza.md):
+  construccion, tail risk, rebalanceo y pesos del comite.
+- [`auditoria_agentes_operativos.md`](auditoria_agentes_operativos.md): SnapTrade
+  read-only, secretos, audit log y workflows.
+
+Estos documentos prevalecen sobre parametros ilustrativos de repos o skills
+importadas. Cada cambio de modelo debe actualizar su auditoria y skill asociada.
+
 ## Regla de adopcion
 
 Cada dependencia debe quedar detras de una interfaz propia. Esto permite cambiar

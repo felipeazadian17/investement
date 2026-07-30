@@ -56,6 +56,20 @@ def project_weights(
             "country",
             constraints.country_max_weights,
         )
+        _scale_additions_to_group_capacity(
+            additions,
+            weights,
+            metadata,
+            "asset_class",
+            constraints.asset_class_max_weights,
+        )
+        _scale_additions_to_group_capacity(
+            additions,
+            weights,
+            metadata,
+            "currency",
+            constraints.currency_max_weights,
+        )
         progress = sum(additions.values())
         if progress <= _TOLERANCE:
             raise ValueError("unable to project weights within constraints")
@@ -75,8 +89,8 @@ def validate_weights(
 ) -> Sequence[str]:
     violations = []
     target = 1.0 - constraints.min_cash
-    if abs(sum(weights.values()) - target) > 1e-7:
-        violations.append("weights do not sum to investable capital")
+    if sum(weights.values()) > target + 1e-7:
+        violations.append("weights exceed investable capital")
     for asset, weight in weights.items():
         if weight < constraints.min_weight - 1e-8:
             violations.append(f"{asset} is below its minimum weight")
@@ -87,6 +101,17 @@ def validate_weights(
     )
     violations.extend(
         _group_violations(weights, metadata, "country", constraints.country_max_weights)
+    )
+    violations.extend(
+        _group_violations(
+            weights,
+            metadata,
+            "asset_class",
+            constraints.asset_class_max_weights,
+        )
+    )
+    violations.extend(
+        _group_violations(weights, metadata, "currency", constraints.currency_max_weights)
     )
     return tuple(violations)
 
@@ -117,6 +142,27 @@ def _available_capacity(
             if metadata.get(candidate, AssetMetadata()).country == asset_metadata.country
         )
         capacity = min(capacity, constraints.country_max_weights[asset_metadata.country] - used)
+    if asset_metadata.asset_class in constraints.asset_class_max_weights:
+        used = sum(
+            weight
+            for candidate, weight in weights.items()
+            if metadata.get(candidate, AssetMetadata()).asset_class
+            == asset_metadata.asset_class
+        )
+        capacity = min(
+            capacity,
+            constraints.asset_class_max_weights[asset_metadata.asset_class] - used,
+        )
+    if asset_metadata.currency in constraints.currency_max_weights:
+        used = sum(
+            weight
+            for candidate, weight in weights.items()
+            if metadata.get(candidate, AssetMetadata()).currency == asset_metadata.currency
+        )
+        capacity = min(
+            capacity,
+            constraints.currency_max_weights[asset_metadata.currency] - used,
+        )
     return max(capacity, 0.0)
 
 
@@ -128,6 +174,18 @@ def _validate_group_minimums(
     violations = _group_violations(
         weights, metadata, "sector", constraints.sector_max_weights
     ) + _group_violations(weights, metadata, "country", constraints.country_max_weights)
+    violations += _group_violations(
+        weights,
+        metadata,
+        "asset_class",
+        constraints.asset_class_max_weights,
+    )
+    violations += _group_violations(
+        weights,
+        metadata,
+        "currency",
+        constraints.currency_max_weights,
+    )
     if violations:
         raise ValueError(f"minimum weights conflict with group caps: {'; '.join(violations)}")
 

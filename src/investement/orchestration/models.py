@@ -1,5 +1,5 @@
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from math import isfinite
 
@@ -51,3 +51,4 @@ class CommitteeDecision:
     dissenting_agents: Sequence[str]
     risk_vetoed_by: Sequence[str]
     findings: Sequence[AgentFinding]
+    effective_weights: Mapping[str, float] = field(default_factory=dict)

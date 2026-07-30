@@ -22,17 +22,14 @@ from investement.agents import (
     AssetDataRequest,
     AuditorAgent,
     DataAgent,
-    FundamentalAgent,
-    FundamentalModelInputs,
     InvestorProfileAgent,
     InvestorProfileRequest,
     PortfolioConstructionAgent,
     PortfolioConstructionInputs,
-    RelativeValuationAgent,
-    RelativeValuationInputs,
     RiskAgent,
     RiskTolerance,
     TechnicalAgent,
+    TechnicalParameters,
 )
 from investement.domain import DataProvenance, PriceBar, SignalAction
 from investement.orchestration import (
@@ -266,12 +263,10 @@ def run_models(universe, raw, benchmark_raw):
             "errors": list(source.get("errors", [])),
         }
 
-    peers = build_peer_observations(prepared)
     data_agent = DataAgent(PreparedMarketData(prepared), clock=lambda: retrieved_at)
     profile = build_profile(universe)
-    fundamental_agent = FundamentalAgent()
-    technical_agent = TechnicalAgent()
-    relative_agent = RelativeValuationAgent()
+    technical_parameters = TechnicalParameters()
+    technical_agent = TechnicalAgent(technical_parameters)
     risk_agent = RiskAgent()
     committee = InvestmentCommittee()
     decisions = {}
@@ -301,8 +296,11 @@ def run_models(universe, raw, benchmark_raw):
                 "adjusted_price_at_evaluation": end_bar.adjusted_close,
             }
         )
-        if len(bars) < 50:
-            row["data_status"] = "insufficient technical history"
+        if len(bars) < technical_parameters.minimum_bars:
+            row["data_status"] = (
+                f"insufficient technical history: {len(bars)}/"
+                f"{technical_parameters.minimum_bars} daily bars"
+            )
             rows.append(row)
             continue
 
@@ -313,6 +311,10 @@ def run_models(universe, raw, benchmark_raw):
         row.update(
             {
                 "technical_score": technical.finding.score,
+                "technical_regime": technical.trend_regime.value,
+                "technical_timing": technical.timing.action.value,
+                "technical_timing_strength": technical.timing.strength,
+                "technical_timing_confidence": technical.timing.confidence,
                 "annual_volatility": technical.annual_volatility,
                 "max_drawdown": technical.max_drawdown,
                 "risk_veto": risk.finding.risk_veto,
@@ -320,64 +322,12 @@ def run_models(universe, raw, benchmark_raw):
             }
         )
 
-        fundamental = None
-        relative = None
         parsed = company["fundamentals"]
-        if parsed.get("model_inputs") is not None:
-            try:
-                fundamental = fundamental_agent.analyze(snapshot, parsed["model_inputs"])
-                findings.append(fundamental.finding)
-                row.update(
-                    {
-                        "valuation_method": parsed["valuation_method"],
-                        "fundamental_period": parsed["fundamental_period"],
-                        "base_cash_flow_or_earnings": parsed["base_value"],
-                        "metric_per_share": parsed["metric_per_share"],
-                        "discount_rate": parsed["model_inputs"].discount_rate,
-                        "terminal_growth_rate": TERMINAL_GROWTH,
-                        "dcf_value_per_share": fundamental.dcf.value_per_share,
-                        "fundamental_score": fundamental.finding.score,
-                        "quality_score": fundamental.quality_score,
-                    }
-                )
-                observations = peers[(item["sector"], parsed["metric_name"])]
-                observations = tuple(obs for obs in observations if obs.symbol != symbol)
-                if parsed["metric_per_share"] > 0 and len(observations) >= 2:
-                    relative = relative_agent.analyze(
-                        snapshot,
-                        fundamental,
-                        RelativeValuationInputs(
-                            target_metric_value=parsed["metric_per_share"],
-                            metric=parsed["metric_name"],
-                            comparables=observations,
-                            dcf_weight=0.60,
-                            required_margin=0.20,
-                            sell_premium=0.20,
-                        ),
-                    )
-                    findings.append(relative.finding)
-                    row.update(
-                        {
-                            "comparables_value_per_share": relative.comparables.value_per_share,
-                            "selected_peer_multiple": relative.comparables.selected_multiple,
-                            "peer_count": relative.comparables.peer_count,
-                            "blended_fair_value": relative.blended_fair_value,
-                            "margin_of_safety": relative.signal.margin_of_safety,
-                            "relative_score": relative.finding.score,
-                        }
-                    )
-                elif fundamental.dcf.value_per_share > 0:
-                    row["blended_fair_value"] = fundamental.dcf.value_per_share
-                    row["margin_of_safety"] = (
-                        fundamental.dcf.value_per_share - start_bar.close
-                    ) / fundamental.dcf.value_per_share
-            except Exception as exc:  # noqa: BLE001 - one model must not abort the universe
-                row["model_errors"].append(f"fundamental model: {type(exc).__name__}: {exc}")
-        else:
-            row["model_errors"].extend(parsed.get("errors", []))
-
-        if fundamental is None:
-            findings.append(neutral_fundamental_finding(snapshot))
+        row["model_errors"].extend(parsed.get("errors", []))
+        row["model_errors"].append(
+            "legacy Yahoo/manual DCF disabled; rerun with SEC XBRL and market-backed WACC"
+        )
+        findings.append(neutral_fundamental_finding(snapshot))
         findings.append(risk.finding)
         decision = committee.decide(tuple(findings))
         decisions[symbol] = decision
@@ -455,70 +405,27 @@ def parse_fundamentals(payload, sector: str, symbol: str):
         capex = ttm(facts, "quarterlyCapitalExpenditure")
         if operating_cash is not None and capex is not None:
             fcf = operating_cash + capex
-    revenue = ttm(facts, "quarterlyTotalRevenue")
-    ebit = ttm(facts, "quarterlyEBIT")
     net_income = ttm(facts, "quarterlyNetIncome")
-    tax = ttm(facts, "quarterlyTaxProvision")
-    pretax = ttm(facts, "quarterlyPretaxIncome")
     shares = latest(facts, "quarterlyOrdinarySharesNumber") or latest(
         facts, "quarterlyDilutedAverageShares"
     )
     if shares is not None:
         shares *= SHARE_EQUIVALENT_MULTIPLIERS.get(symbol, 1.0)
-    debt = latest(facts, "quarterlyTotalDebt") or 0.0
-    cash = latest(facts, "quarterlyCashCashEquivalentsAndShortTermInvestments") or 0.0
-    net_debt = latest(facts, "quarterlyNetDebt")
-    if net_debt is None:
-        net_debt = debt - cash
-    equity = latest(facts, "quarterlyStockholdersEquity")
     period = latest_period(facts)
-    revenue_growth = year_over_year(facts, "quarterlyTotalRevenue")
     if shares is None or shares <= 0:
         errors.append("missing positive share count")
     if sector == "Financials":
         base = net_income
         metric_name = "P/E"
         valuation_method = "earnings-discount proxy"
-        model_net_debt = 0.0
     else:
         base = fcf
         metric_name = "P/FCF"
         valuation_method = "free-cash-flow DCF"
-        model_net_debt = net_debt
     if base is None:
         errors.append("missing four-quarter base cash flow or earnings")
-    if revenue_growth is None:
-        revenue_growth = 0.04
-    initial_growth = clamp(revenue_growth, -0.10, 0.20)
-    growth_rates = tuple(initial_growth + (0.035 - initial_growth) * year / 4 for year in range(5))
-    tax_rate = 0.21
-    if tax is not None and pretax not in (None, 0):
-        tax_rate = clamp(tax / pretax, 0.0, 0.35)
-    margin = ebit / revenue if ebit is not None and revenue not in (None, 0) else None
-    invested_capital = debt + equity - cash if equity is not None else None
-    roic = (
-        ebit * (1 - tax_rate) / invested_capital
-        if ebit is not None and invested_capital is not None and invested_capital > 0
-        else None
-    )
-    debt_to_fcf = debt / fcf if fcf is not None and fcf > 0 else None
     metric_per_share = base / shares if base is not None and shares not in (None, 0) else None
-    model_inputs = None
-    if base is not None and shares is not None and shares > 0:
-        model_inputs = FundamentalModelInputs(
-            base_free_cash_flow=float(base),
-            growth_rates=growth_rates,
-            discount_rate=SECTOR_WACC.get(sector, 0.09),
-            terminal_growth_rate=TERMINAL_GROWTH,
-            net_debt=float(model_net_debt),
-            diluted_shares=float(shares),
-            roic=roic,
-            revenue_growth=revenue_growth,
-            operating_margin=margin,
-            debt_to_free_cash_flow=debt_to_fcf,
-        )
     return {
-        "model_inputs": model_inputs,
         "valuation_method": valuation_method,
         "metric_name": metric_name,
         "metric_per_share": metric_per_share,

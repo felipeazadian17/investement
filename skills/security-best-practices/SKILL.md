@@ -5,6 +5,15 @@ description: "Perform language and framework specific security best-practice rev
 
 # Security Best Practices
 
+## Investement Project Usage
+
+For broker, audit or workflow changes, also read
+`../../investigacion/auditoria_agentes_operativos.md` and the local
+`broker-read-only` skill. Secrets, account identifiers, signatures, cookies and
+tokens must be redacted at the core audit-log boundary, not only by callers.
+SnapTrade credentials remain in macOS Keychain and the runtime surface stays
+strictly read-only.
+
 ## Overview
 
 This skill provides a description of how to identify the language and frameworks used by the current context, and then to load information from this skill's references directory about the security best practices for this language and or frameworks.

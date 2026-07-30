@@ -104,6 +104,21 @@ class FundamentalSnapshot:
     provenance: DataProvenance
     period_start: date | None = None
     period_basis: str | None = None
+    net_income: float | None = None
+    pretax_income: float | None = None
+    income_tax_expense: float | None = None
+    interest_expense: float | None = None
+    depreciation_and_amortization: float | None = None
+    stock_based_compensation: float | None = None
+    short_term_investments: float | None = None
+    long_term_investments: float | None = None
+    operating_lease_liabilities: float | None = None
+    preferred_stock: float | None = None
+    noncontrolling_interest: float | None = None
+    pension_liabilities: float | None = None
+    total_equity: float | None = None
+    total_assets: float | None = None
+    current_shares_outstanding: float | None = None
 
     def __post_init__(self) -> None:
         if not self.symbol.strip():
@@ -118,12 +133,29 @@ class FundamentalSnapshot:
             "cash_and_equivalents",
             "total_debt",
             "diluted_shares",
+            "net_income",
+            "pretax_income",
+            "income_tax_expense",
+            "interest_expense",
+            "depreciation_and_amortization",
+            "stock_based_compensation",
+            "short_term_investments",
+            "long_term_investments",
+            "operating_lease_liabilities",
+            "preferred_stock",
+            "noncontrolling_interest",
+            "pension_liabilities",
+            "total_equity",
+            "total_assets",
+            "current_shares_outstanding",
         ):
             value = getattr(self, name)
             if value is not None:
                 require_finite(float(value), name)
         if self.diluted_shares is not None and self.diluted_shares <= 0:
             raise ValueError("diluted_shares must be positive")
+        if self.current_shares_outstanding is not None and self.current_shares_outstanding <= 0:
+            raise ValueError("current_shares_outstanding must be positive")
         if self.period_start is not None and self.period_start > self.period_end:
             raise ValueError("period_start cannot be after period_end")
 

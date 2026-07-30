@@ -60,7 +60,7 @@ y fundamentales se obtienen de proveedores separados y reemplazables.
 
 Estima valor razonable y calidad de negocio usando, entre otros:
 
-- DCF simplificado.
+- DCF FCFF driver-based con LTM, WACC de mercado y sensibilidad.
 - Multiplos comparables.
 - Earnings yield.
 - Crecimiento esperado.
@@ -84,6 +84,14 @@ Apoya decisiones de timing y control de entrada/salida. No busca adivinar grafic
 - Soportes y resistencias.
 - Volumen.
 - Regimen de mercado.
+
+El baseline diario usa SMA 50/200 con banda neutral de 1%, momentum 12-1 y
+63 dias, RSI Wilder 14, MACD 12/26/9, ATR 14, volumen relativo 20 y breakouts
+de 63 dias. Requiere 253 ruedas y emite una senal tactica separada (`favor_entry`,
+`hold`, `wait`, `tighten_risk` o `favor_exit`) con vigencia y confianza. La
+senal solo puede ejecutarse desde la barra siguiente y no reemplaza valuacion,
+construccion de portfolio ni veto de riesgo. La metodologia y sus fuentes estan
+en [`investigacion/auditoria_modelo_tecnico.md`](investigacion/auditoria_modelo_tecnico.md).
 
 ### Agente de Valuacion Relativa
 
@@ -112,6 +120,13 @@ Debe controlar:
 - Liquidez.
 - Tamano de posicion.
 
+El baseline implementado es inverse volatility long-only con caps por activo,
+sector, pais, clase de activo y moneda. Puede aumentar cash para respetar la
+volatilidad maxima del perfil y registra VaR/Expected Shortfall historicos,
+drawdown, contribuciones al riesgo, numero efectivo de posiciones y turnover.
+Los rebalanceos usan una banda configurable; ventas obligatorias no quedan
+bloqueadas por ella.
+
 Metodos candidatos:
 
 - Mean-variance con restricciones.
@@ -131,6 +146,10 @@ Bloquea o alerta operaciones peligrosas:
 - Exposicion cambiaria no deseada.
 - Ordenes demasiado grandes.
 - Posibles problemas fiscales, como wash-sale si aplica.
+
+Los hard breaches producen veto; las alertas quedan separadas y una aprobacion
+de riesgo tiene score direccional cero. El control de portfolio reconstruye
+exposiciones agregadas y contrasta volatilidad y drawdown con el perfil.
 
 ### Agente de Broker SnapTrade
 
@@ -207,10 +226,10 @@ La primera base ejecutable de los puntos 1 a 6 ya esta disponible:
 | Componente | Implementacion |
 | --- | --- |
 | Datos | proveedores normalizados, cache JSON atomico y provenance |
-| Valuacion | DCF, sensibilidad, comparables robustos y margen de seguridad |
-| Portfolio | restricciones propias y backends PyPortfolioOpt/Riskfolio |
+| Valuacion | FCFF DCF, WACC de mercado, convergencia, sensibilidad y comparables |
+| Portfolio | caps multidimensionales, cash por volatilidad, tail risk y bandas |
 | Backtesting | motor causal con delay, costos, metricas, QuantStats y vectorbt |
-| Agentes | workflow, comite con disenso/veto, memoria y auditoria con hash chain |
+| Agentes | factores independientes, comite ponderado, workflow versionado y audit hash chain |
 | Broker | SnapTrade Personal estrictamente read-only, sin metodos de ordenes |
 
 ## Agentes Implementados
@@ -222,13 +241,37 @@ Cada rol del diseño inicial tiene ahora una clase concreta en
 | --- | --- | --- |
 | Perfil del inversor | `InvestorProfileAgent` | perfil normalizado y restricciones |
 | Datos | `DataAgent` | snapshot point-in-time con evidencia |
-| Fundamental | `FundamentalAgent` | DCF, calidad y hallazgo estructurado |
-| Tecnico | `TechnicalAgent` | tendencia, momentum, RSI, MACD y riesgo observado |
+| Fundamental | `FundamentalAgent` | LTM, FCFF DCF, WACC, puente a equity y sensibilidad |
+| Tecnico | `TechnicalAgent` | regimen, riesgo y timing no vinculante de entrada/salida |
 | Valuacion relativa | `RelativeValuationAgent` | fair value combinado y margen de seguridad |
 | Construccion de portfolio | `PortfolioConstructionAgent` | pesos objetivo y rebalanceos |
 | Riesgo | `RiskAgent` | hard limits, explicaciones y veto |
 | Broker SnapTrade | `SnapTradeBrokerAgent` | cuentas y posiciones read-only |
 | Auditor | `AuditorAgent` | memoria y log con hash chain y secretos redactados |
+
+### Seleccion automatica de comparables
+
+`RelativeValuationAgent` puede recibir un universo de candidatos y seleccionar
+automaticamente entre 5 y 12 peers antes de calcular la mediana del multiplo. El
+selector no usa el multiplo para decidir similitud, evitando circularidad. Aplica:
+
+- filtros por tipo de compania, sector/mix de negocio, ciclo de vida y fecha de corte;
+- score por actividad, crecimiento, rentabilidad, capital intensity, tamano y riesgo;
+- pesos distintos para P/E, P/B, P/FCF, EV/EBITDA, EV/EBIT y EV/Sales;
+- normalizacion robusta mediante mediana y MAD, sin modificar los datos fuente;
+- umbrales de similitud y cobertura, sin forzar peers insuficientes;
+- razones, scores y rechazos persistidos en el audit log.
+
+Los perfiles y multiplos se construyen desde `LTMFundamentals` con
+`peer_profile_from_fundamentals(...)`,
+`comparable_observation_from_fundamentals(...)` y
+`comparable_target_from_fundamentals(...)`. La clasificacion de negocio y el mix
+de segmentos se incorporan desde el universo point-in-time. Los multiplos EV
+exigen el puente completo de enterprise value a equity por accion antes de
+combinarse con un DCF.
+
+La carga manual sigue disponible para fixtures y casos excepcionales, pero queda
+marcada como riesgo porque la similitud economica no fue auditada.
 
 ### Perfil Personalizado
 
@@ -277,10 +320,16 @@ El nucleo determinista no necesita los extras:
   corporativas y construye hacia adelante un indice de retorno total causal. El
   precio vigente sigue siendo `Close`; `Adj Close` se conserva solo como
   metadata de diagnostico y no participa del calculo.
-- SEC: `EdgarProvider` exige una identidad con email y extrae revenue, EBIT,
-  cash flow operativo, capex, caja, deuda y acciones diluidas desde el XBRL del
-  `10-K` o `10-Q` aceptado antes de `as_of`. No mezcla Company Facts revisados
-  posteriormente.
+- SEC: `EdgarProvider` exige una identidad con email y extrae income statement,
+  cash flow, deuda, caja, inversiones, leases, equity y claims no comunes desde
+  el XBRL del `10-K` o `10-Q` aceptado antes de `as_of`. Ocho filings permiten
+  construir LTM con `FY + YTD actual - YTD comparable`; no mezcla Company Facts
+  revisados posteriormente.
+- DCF: `FundamentalAgent` no recibe supuestos manuales por empresa. Calcula beta
+  contra SPY, CAPM, costo de deuda por spread sintetico, WACC con pesos de
+  mercado, convergencia de revenue/margen/ROIC, `g` consistente con reinversion,
+  puente completo a equity y sensibilidad 5x5. La auditoria metodologica esta en
+  [`investigacion/auditoria_modelo_dcf.md`](investigacion/auditoria_modelo_dcf.md).
 - Fondos y derivados: `YFinanceProvider` normaliza asset classes, sectores,
   top holdings y operaciones de ETFs/fondos mutuos, ademas de calls y puts por
   vencimiento. Estos endpoints son current-only y rechazan fechas historicas.

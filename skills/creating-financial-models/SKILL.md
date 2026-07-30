@@ -1,173 +1,134 @@
 ---
 name: creating-financial-models
-description: This skill provides an advanced financial modeling suite with DCF analysis, sensitivity testing, Monte Carlo simulations, and scenario planning for investment decisions
+description: Build auditable point-in-time financial models with explicit inputs, calculations, outputs, scenarios, sensitivities, and validation. Use for DCF, three-statement models, Monte Carlo analysis, project finance, M&A, LBO, or decision models where assumption provenance and model integrity matter.
 ---
 
-# Financial Modeling Suite
+# Auditable Financial Modeling
 
-A comprehensive financial modeling toolkit for investment analysis, valuation, and risk assessment using industry-standard methodologies.
+## Architecture
 
-## Core Capabilities
+Separate the model into four layers:
 
-### 1. Discounted Cash Flow (DCF) Analysis
-- Build complete DCF models with multiple growth scenarios
-- Calculate terminal values using perpetuity growth and exit multiple methods
-- Determine weighted average cost of capital (WACC)
-- Generate enterprise and equity valuations
+1. **Observed inputs**: dated filings, market data and operating facts.
+2. **Assumptions**: explicit forecasts, scenarios and policy choices.
+3. **Calculations**: formulas with no hidden plugs.
+4. **Outputs**: valuation, sensitivities, checks and decision metrics.
 
-### 2. Sensitivity Analysis
-- Test key assumptions impact on valuation
-- Create data tables for multiple variables
-- Generate tornado charts for sensitivity ranking
-- Identify critical value drivers
+Every input must carry unit, currency, period, `available_at`, source and any
+normalization. Never mix observed history with assumptions in the same field.
 
-### 3. Monte Carlo Simulation
-- Run thousands of scenarios with probability distributions
-- Model uncertainty in key inputs
-- Generate confidence intervals for valuations
-- Calculate probability of achieving targets
+## Point-in-Time Gate
 
-### 4. Scenario Planning
-- Build best/base/worst case scenarios
-- Model different economic environments
-- Test strategic alternatives
-- Compare outcome probabilities
+Before calculating:
 
-## Input Requirements
+- Set `as_of` and reject any later filing acceptance or market observation.
+- Distinguish duration facts from instant facts.
+- Reconcile annual and interim periods before building LTM.
+- Keep original reported values and record every adjustment separately.
+- Reject silent fallback values. A default is allowed only as a named scenario
+  assumption with a source and sensitivity range.
 
-### For DCF Analysis
-- Historical financial statements (3-5 years)
-- Revenue growth assumptions
-- Operating margin projections
-- Capital expenditure forecasts
-- Working capital requirements
-- Terminal growth rate or exit multiple
-- Discount rate components (risk-free rate, beta, market premium)
+## DCF Models
 
-### For Sensitivity Analysis
-- Base case model
-- Variable ranges to test
-- Key metrics to track
+For corporate valuation, follow [`../dcf/SKILL.md`](../dcf/SKILL.md). Required
+features include FCFF/WACC consistency, market-value capital weights, operating
+driver convergence, terminal reinvestment, a complete EV-to-equity bridge and
+invalid-cell handling in sensitivity tables.
 
-### For Monte Carlo Simulation
-- Probability distributions for uncertain variables
-- Correlation assumptions between variables
-- Number of iterations (typically 1,000-10,000)
+Use [`dcf_model.py`](dcf_model.py) only as a calculation reference. Production
+analysis in this repository must call `investement.valuation` so formulas do not
+diverge from the tested agent.
 
-### For Scenario Planning
-- Scenario definitions and assumptions
-- Probability weights for scenarios
-- Key performance indicators to track
+## Three-Statement Forecasting
 
-## Output Formats
+Forecast the income statement, balance sheet and cash-flow statement as one
+system:
 
-### DCF Model Output
-- Complete financial projections
-- Free cash flow calculations
-- Terminal value computation
-- Enterprise and equity value summary
-- Valuation multiples implied
-- Excel workbook with full model
+- Revenue by operating driver where available.
+- Costs coherently with revenue, capacity and inflation.
+- Working capital through operating efficiency ratios.
+- Maintenance and growth capex separately when disclosures permit.
+- Debt, interest, cash and financing needs through a transparent circularity
+  solver or an explicit iteration.
+- Share count through buybacks, issuance, options and convertibles.
 
-### Sensitivity Analysis Output
-- Sensitivity tables showing value ranges
-- Tornado chart of key drivers
-- Break-even analysis
-- Charts showing relationships
+Required checks:
 
-### Monte Carlo Output
-- Probability distribution of valuations
-- Confidence intervals (e.g., 90%, 95%)
-- Statistical summary (mean, median, std dev)
-- Risk metrics (VaR, probability of loss)
+```text
+assets = liabilities + equity
+beginning cash + cash flow change = ending cash
+retained earnings roll-forward reconciles
+debt roll-forward reconciles with interest and financing cash flow
+```
 
-### Scenario Planning Output
-- Scenario comparison table
-- Probability-weighted expected values
-- Decision tree visualization
-- Risk-return profiles
+## Scenarios
 
-## Model Types Supported
+Use scenarios when the business has non-linear outcomes, limited history or
+material strategic uncertainty. Each scenario must vary coherent groups of
+drivers, not isolated numbers.
 
-1. **Corporate Valuation**
-   - Mature companies with stable cash flows
-   - Growth companies with J-curve projections
-   - Turnaround situations
+Typical scenario dimensions:
 
-2. **Project Finance**
-   - Infrastructure projects
-   - Real estate developments
-   - Energy projects
+- Revenue growth and market share.
+- Margin path and operating leverage.
+- Reinvestment, working capital and capital intensity.
+- Cost of capital and credit spread.
+- Survival, refinancing, regulation or product approval.
+- Dilution and capital raising.
 
-3. **M&A Analysis**
-   - Acquisition valuations
-   - Synergy modeling
-   - Accretion/dilution analysis
+Probabilities must sum to one and be disclosed. Do not interpret an expected
+value as the most likely realized value.
 
-4. **LBO Models**
-   - Leveraged buyout analysis
-   - Returns analysis (IRR, MOIC)
-   - Debt capacity assessment
+## Sensitivity
 
-## Best Practices Applied
+Use sensitivity for continuous uncertainty and scenarios for structural states.
 
-### Modeling Standards
-- Consistent formatting and structure
-- Clear assumption documentation
-- Separation of inputs, calculations, outputs
-- Error checking and validation
-- Version control and change tracking
+- DCF default: 5x5 WACC versus terminal `g`.
+- Mark economically invalid cells as `N/A`.
+- Add one-way or tornado analysis for margins, growth, ROIC, capex, working
+  capital and dilution when material.
+- Restore the base model after each test; avoid state leakage between cells.
+- Show both absolute output and change versus base.
 
-### Valuation Principles
-- Use multiple valuation methods for triangulation
-- Apply appropriate risk adjustments
-- Consider market comparables
-- Validate against trading multiples
-- Document key assumptions clearly
+The generic helper [`sensitivity_analysis.py`](sensitivity_analysis.py) can be
+used for non-DCF models, but callers remain responsible for economic validators
+and state restoration.
 
-### Risk Management
-- Identify and quantify key risks
-- Use probability-weighted scenarios
-- Stress test extreme cases
-- Consider correlation effects
-- Provide confidence intervals
+## Monte Carlo
 
-## Example Usage
+Use Monte Carlo only when distributions and dependencies are defensible.
 
-"Build a DCF model for this technology company using the attached financials"
+- Specify distribution choice and calibration source.
+- Model correlations; independent draws are not a neutral assumption.
+- Reject impossible draws before valuation.
+- Use enough iterations for stable percentiles and report the random seed.
+- Report median, mean, percentiles and probability of loss, not only a chart.
 
-"Run a Monte Carlo simulation on this acquisition model with 5,000 iterations"
+Monte Carlo does not repair a structurally wrong model.
 
-"Create sensitivity analysis showing impact of growth rate and WACC on valuation"
+## Model-Specific Requirements
 
-"Develop three scenarios for this expansion project with probability weights"
+| Model | Additional requirements |
+| --- | --- |
+| M&A | Standalone values, synergies, timing, financing, fees, accretion/dilution |
+| LBO | Sources/uses, debt tranches, mandatory amortization, cash sweep, exit range |
+| Project finance | Construction schedule, availability, covenants, DSCR/LLCR, reserves |
+| Real estate | Lease roll, occupancy, tenant improvements, cap rates, debt maturity |
+| Turnaround | Liquidity runway, restructuring costs, survival and financing dilution |
 
-## Scripts Included
+## Validation
 
-- `dcf_model.py`: Complete DCF valuation engine
-- `sensitivity_analysis.py`: Sensitivity testing framework
+1. Reconcile all statements and roll-forwards.
+2. Verify units, signs, currency and timing conventions.
+3. Test formula monotonicity where economics imply it.
+4. Check terminal-value share and implied multiples.
+5. Compare with historical performance and relevant peers without forcing a fit.
+6. Inspect extreme but valid inputs rather than clipping them silently.
+7. Run downside liquidity and covenant checks.
+8. Preserve an audit trail of inputs, assumptions and model version.
 
-## Limitations and Disclaimers
+## Output
 
-- Models are only as good as their assumptions
-- Past performance doesn't guarantee future results
-- Market conditions can change rapidly
-- Regulatory and tax changes may impact results
-- Professional judgment required for interpretation
-- Not a substitute for professional financial advice
-
-## Quality Checks
-
-The model automatically performs:
-1. Balance sheet balancing checks
-2. Cash flow reconciliation
-3. Circular reference resolution
-4. Sensitivity bound checking
-5. Statistical validation of Monte Carlo results
-
-## Updates and Maintenance
-
-- Models use latest financial theory and practices
-- Regular updates for market parameter defaults
-- Incorporation of regulatory changes
-- Continuous improvement based on usage patterns
+Provide an assumptions table, calculation summary, scenario/sensitivity results,
+validation checks, material limitations and exact files or code used. State which
+results are observed, modeled and judgmental.

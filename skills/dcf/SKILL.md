@@ -1,123 +1,205 @@
 ---
 name: dcf-valuation
-description: Performs discounted cash flow (DCF) valuation analysis to estimate intrinsic value per share. Triggers when user asks for fair value, intrinsic value, DCF, valuation, "what is X worth", price target, undervalued/overvalued analysis, or wants to compare current price to fundamental value.
+description: Build or audit point-in-time corporate DCF valuations with LTM financials, FCFF/WACC consistency, market-derived capital costs, driver-based convergence, enterprise-to-equity bridges, terminal-growth validation, and sensitivity analysis. Use for intrinsic value, fair value, price target, DCF, WACC, terminal value, or valuation-model review requests.
 ---
 
-# DCF Valuation Skill
+# Point-in-Time DCF Valuation
 
-## Workflow Checklist
+## Non-Negotiable Rules
 
-Copy and track progress:
+1. Match cash flow and discount rate:
+   - FCFF -> WACC -> enterprise value.
+   - FCFE -> cost of equity -> common equity value.
+2. Do not label `CFO - capex` as FCFF under US GAAP. Interest paid is normally
+   in CFO, so this measure is levered. A cash-flow-statement bridge is:
+   `FCFF = CFO - capex + interest expense * (1 - marginal tax rate)`.
+3. Use only observations available at the valuation `as_of`. Record source,
+   period, filing acceptance date, market observation date and adjustments.
+4. Never silently replace missing company data with generic defaults.
+5. Keep observed extreme values. Control implausible extrapolation through
+   convergence and scenarios, not by rewriting history.
+6. Do not force FCFF DCF onto financial institutions, early-stage companies,
+   negative-EBIT businesses or companies with non-positive invested capital.
+
+## Workflow
+
+Track these steps:
+
+```text
+- [ ] Select the applicable valuation model
+- [ ] Establish the point-in-time cutoff and data provenance
+- [ ] Build LTM financials and comparable growth
+- [ ] Reconcile FCFF and invested capital
+- [ ] Calculate market-backed WACC
+- [ ] Project operating drivers and convergence
+- [ ] Validate terminal economics
+- [ ] Bridge enterprise value to common equity
+- [ ] Run sensitivity and cross-checks
+- [ ] Report assumptions, risks and invalidation conditions
 ```
-DCF Analysis Progress:
-- [ ] Step 1: Gather financial data
-- [ ] Step 2: Calculate FCF growth rate
-- [ ] Step 3: Estimate discount rate (WACC)
-- [ ] Step 4: Project future cash flows (Years 1-5 + Terminal)
-- [ ] Step 5: Calculate present value and fair value per share
-- [ ] Step 6: Run sensitivity analysis
-- [ ] Step 7: Validate results
-- [ ] Step 8: Present results with caveats
+
+## 1. Select the Model
+
+Use FCFF DCF for a non-financial operating company when revenue, EBIT, invested
+capital and a plausible path to positive FCFF are observable.
+
+Route other cases explicitly:
+
+| Company | Primary approach |
+| --- | --- |
+| Bank, insurer, broker or other financial institution | Residual income, DDM or justified P/B |
+| Stable dividend payer with interpretable payout policy | DDM plus residual income or multiples |
+| Early-stage or negative EBIT | Probability-weighted revenue, margin, survival and dilution scenarios |
+| Cyclical | Mid-cycle normalized earnings and commodity/capacity scenarios |
+| Conglomerate | SOTP with method chosen per segment |
+| Distressed | Reorganization/liquidation scenarios; do not use a single Gordon perpetuity |
+
+Fail closed when the required model has not been implemented.
+
+## 2. Build Point-in-Time LTM
+
+Prefer as-filed SEC XBRL from 10-K and 10-Q filings accepted by `as_of`. Request
+enough history for the bridge; eight filings is the minimum default, not a
+guarantee for every fiscal calendar.
+
+For the latest interim period:
+
+```text
+LTM metric = latest FY + current YTD - prior-year comparable YTD
 ```
 
-## Step 1: Gather Financial Data
+Apply the bridge to additive duration facts such as revenue, EBIT, net income,
+CFO, capex, taxes, interest, D&A and stock-based compensation. Use the latest
+instant facts for balance-sheet values. Reconstruct diluted LTM shares with
+share-days; use the greater of current shares and diluted LTM shares when a
+fully diluted current count is unavailable.
 
-Call the `get_financials` tool with these queries:
+Initial growth must compare like periods: YTD versus comparable YTD, or FY
+versus prior FY. Do not compare two consecutive rolling LTM periods as though
+that were annual growth.
 
-### 1.1 Cash Flow History
-**Query:** `"[TICKER] annual cash flow statements for the last 5 years"`
+## 3. Reconcile FCFF
 
-**Extract:** `free_cash_flow`, `net_cash_flow_from_operations`, `capital_expenditure`
+Preferred operating formula:
 
-**Fallback:** If `free_cash_flow` missing, calculate: `net_cash_flow_from_operations - capital_expenditure`
+```text
+NOPAT = adjusted EBIT * (1 - normalized tax rate)
+FCFF = NOPAT + D&A - capex - change in operating working capital
+```
 
-### 1.2 Financial Metrics
-**Query:** `"[TICKER] financial metrics snapshot"`
+Cash-flow-statement cross-check:
 
-**Extract:** `market_cap`, `enterprise_value`, `free_cash_flow_growth`, `revenue_growth`, `return_on_invested_capital`, `debt_to_equity`, `free_cash_flow_per_share`
+```text
+FCFF = CFO - capex + interest expense * (1 - tax rate)
+```
 
-### 1.3 Balance Sheet
-**Query:** `"[TICKER] latest balance sheet"`
+If operating leases are treated as debt, estimate their interest component,
+add it back to reported EBIT, include leases in invested capital/WACC and
+subtract the lease liability in the equity bridge. Do all four or none.
 
-**Extract:** `total_debt`, `cash_and_equivalents`, `current_investments`, `outstanding_shares`
+## 4. Calculate Market-Backed WACC
 
-**Fallback:** If `current_investments` missing, use 0
+```text
+Ke = risk-free rate + adjusted beta * equity risk premium
+Kd = risk-free rate + issuer default spread
+WACC = E/(D+E) * Ke + D/(D+E) * Kd * (1-T)
+```
 
-### 1.4 Current Price
-Call the `get_market_data` tool:
+Requirements:
 
-**Query:** `"[TICKER] price snapshot"`
+- Risk-free rate and ERP must be dated observations available at `as_of`.
+- Estimate company beta from five years of aligned monthly total returns versus
+  a broad market benchmark, with at least 24 observations. Record raw and
+  adjusted beta. Use a sector beta only as a documented fallback.
+- Estimate default spread from traded debt/CDS when available. Otherwise use a
+  dated synthetic-rating table and issuer interest coverage.
+- Use market equity and debt plus capitalized leases for capital weights.
+- Treat [sector-wacc.md](sector-wacc.md) as a reasonableness check, not an input
+  that overrides observable company and market data.
 
-**Extract:** `price`
+## 5. Project Drivers and Convergence
 
-### 1.5 Company Facts
-Call the `get_financials` tool:
+Use at least five explicit years; seven is the project default. Project revenue,
+EBIT margin, NOPAT, ROIC, reinvestment and FCFF rather than applying one FCF CAGR.
 
-**Query:** `"[TICKER] company facts"`
+```text
+reinvestment rate_t = growth_t / ROIC_t
+FCFF_t = NOPAT_t * (1 - reinvestment rate_t)
+```
 
-**Extract:** `sector`, `industry`, `market_cap`
+Fade initial growth toward terminal growth. Fade abnormal margins toward a
+normalized historical or sector margin. Fade excess ROIC toward a stable return,
+normally near WACC absent a defensible durable advantage. A growth rate above
+ROIC can legitimately produce negative FCFF because reinvestment exceeds NOPAT.
 
-**Use:** Determine appropriate WACC range from [sector-wacc.md](sector-wacc.md)
+For startups or unstable businesses, use separate scenarios for survival,
+revenue, target margin, capital intensity and dilution. Do not summarize that
+uncertainty with one deterministic CAGR.
 
-## Step 2: Calculate FCF Growth Rate
+## 6. Validate Terminal Value
 
-Calculate 5-year FCF CAGR from cash flow history.
+For a perpetual-growth terminal value:
 
-**Cross-validate with:** `free_cash_flow_growth` (YoY), `revenue_growth`
+```text
+terminal reinvestment = g / stable ROIC
+terminal FCFF = terminal NOPAT * (1 - g / stable ROIC)
+TV = terminal FCFF / (WACC - g)
+```
 
-**Growth rate selection:**
-- Stable FCF history → Use CAGR with 10-20% haircut
-- **Cap at 15%** (sustained higher growth is rare)
+Require all of the following:
 
-## Step 3: Estimate Discount Rate (WACC)
+- `0 <= g < WACC`.
+- `g <= long-run risk-free rate` for a nominal same-currency model.
+- `g < stable ROIC`.
+- Currency, inflation and discount-rate assumptions are consistent.
 
-**Use the `sector` from company facts** to select the appropriate base WACC range from [sector-wacc.md](sector-wacc.md).
+An exit multiple is a cross-check, not a way to hide an invalid perpetuity.
 
-**Default assumptions:**
-- Risk-free rate: 4%
-- Equity risk premium: 5-6%
-- Cost of debt: 5-6% pre-tax (~4% after-tax at 30% tax rate)
+## 7. Bridge Enterprise Value to Common Equity
 
-Calculate WACC using `debt_to_equity` for capital structure weights.
+```text
+common equity value = enterprise value
+  + cash and equivalents
+  + short-term investments
+  + nonoperating long-term investments
+  - debt
+  - operating lease liabilities
+  - preferred stock
+  - noncontrolling interests
+  - unfunded pension claims
+  +/- other explicit nonoperating adjustments
+```
 
-**Reasonableness check:** WACC should be 2-4% below `return_on_invested_capital` for value-creating companies.
+Never combine `net debt` with a separate cash add-back unless the definition is
+explicit; that double counts cash. List unreported bridge items and state when
+they are treated as zero.
 
-**Sector adjustments:** Apply adjustment factors from [sector-wacc.md](sector-wacc.md) based on company-specific characteristics.
+## 8. Sensitivity and Validation
 
-## Step 4: Project Future Cash Flows
+Produce a 5x5 WACC-versus-`g` matrix by default:
 
-**Years 1-5:** Apply growth rate with 5% annual decay (multiply growth rate by 0.95, 0.90, 0.85, 0.80 for years 2-5). This reflects competitive dynamics.
+- WACC: base +/-2% in 1% steps.
+- `g`: base +/-1% in 0.5% steps.
+- Invalid cells where `g >= WACC`, `g > risk-free` or `g >= stable ROIC` are
+  `N/A`, never enormous numeric outputs.
 
-**Terminal value:** Use Gordon Growth Model with 2.5% terminal growth (GDP proxy).
+Also report terminal-value share, implied EV multiples, valuation versus market
+price, observed cash conversion and the effect of the complete equity bridge.
+Large deviations are prompts to inspect assumptions, not reasons to force the
+DCF toward the current enterprise value.
 
-## Step 5: Calculate Present Value
+## Output
 
-Discount all FCFs → sum for Enterprise Value → subtract Net Debt → divide by `outstanding_shares` for fair value per share.
+Include:
 
-## Step 6: Sensitivity Analysis
+1. Model selection and cutoff date.
+2. LTM reconciliation and source filings.
+3. FCFF, WACC and bridge formulas with dated inputs.
+4. Annual operating projection and terminal reinvestment.
+5. Enterprise value, common equity value and value per diluted share.
+6. Sensitivity matrix and scenario range.
+7. Missing data, model risks and invalidation conditions.
 
-Create 3×3 matrix: WACC (base ±1%) vs terminal growth (2.0%, 2.5%, 3.0%).
-
-## Step 7: Validate Results
-
-Before presenting, verify these sanity checks:
-
-1. **EV comparison**: Calculated EV should be within 30% of reported `enterprise_value`
-   - If off by >30%, revisit WACC or growth assumptions
-
-2. **Terminal value ratio**: Terminal value should be 50-80% of total EV for mature companies
-   - If >90%, growth rate may be too high
-   - If <40%, near-term projections may be aggressive
-
-3. **Per-share cross-check**: Compare to `free_cash_flow_per_share × 15-25` as rough sanity check
-
-If validation fails, reconsider assumptions before presenting results.
-
-## Step 8: Output Format
-
-Present a structured summary including:
-1. **Valuation Summary**: Current price vs. fair value, upside/downside percentage
-2. **Key Inputs Table**: All assumptions with their sources
-3. **Projected FCF Table**: 5-year projections with present values
-4. **Sensitivity Matrix**: 3×3 grid varying WACC (±1%) and terminal growth (2.0%, 2.5%, 3.0%)
-5. **Caveats**: Standard DCF limitations plus company-specific risks
+For this repository, read
+[`../../investigacion/auditoria_modelo_dcf.md`](../../investigacion/auditoria_modelo_dcf.md)
+for the implemented methodology and primary references.

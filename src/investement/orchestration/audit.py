@@ -1,5 +1,7 @@
 import hashlib
 import json
+import os
+import re
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -7,6 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+_SENSITIVE_KEY = re.compile(
+    r"api.?key|secret|token|password|authorization|consumer.?key|client.?id|"
+    r"credential|signature|cookie|account.?number",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -43,10 +51,22 @@ class JsonlAuditLog:
             }
             event_hash = _hash(body)
             event = AuditEvent(event_hash=event_hash, **body)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(asdict(event), sort_keys=True, separators=(",", ":")))
-                handle.write("\n")
-                handle.flush()
+            line = json.dumps(asdict(event), sort_keys=True, separators=(",", ":")) + "\n"
+            descriptor = os.open(
+                self.path,
+                os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                remaining = memoryview(line.encode("utf-8"))
+                while remaining:
+                    written = os.write(descriptor, remaining)
+                    if written <= 0:
+                        raise OSError("audit log write made no progress")
+                    remaining = remaining[written:]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
             return event
 
     def read(self) -> Sequence[AuditEvent]:
@@ -89,7 +109,10 @@ def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        return {
+            str(key): "[REDACTED]" if _SENSITIVE_KEY.search(str(key)) else _json_safe(item)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple, set)):
         return [_json_safe(item) for item in value]
     if hasattr(value, "isoformat"):

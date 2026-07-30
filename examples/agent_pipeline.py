@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,17 +7,24 @@ from investement.agents import (
     AssetDataRequest,
     AuditorAgent,
     DataAgent,
-    FundamentalModelInputs,
+    FundamentalAgent,
     InvestmentAgentPipeline,
     InvestorProfileRequest,
     PortfolioConstructionInputs,
     RelativeValuationInputs,
     RiskTolerance,
 )
-from investement.domain import DataProvenance, PriceBar
+from investement.domain import DataProvenance, FundamentalSnapshot, PriceBar
 from investement.orchestration import JsonlAuditLog, JsonMemoryStore
 from investement.portfolio import AssetMetadata
-from investement.valuation import ComparableObservation
+from investement.valuation import (
+    ComparableObservation,
+    CreditSpreadObservation,
+    FixedCreditSpreadProvider,
+    FixedMarketRateProvider,
+    MarketRateObservation,
+    MarketWACCBuilder,
+)
 
 
 class SyntheticMarketData:
@@ -30,7 +37,17 @@ class SyntheticMarketData:
         return self._bars
 
 
-def make_bars(count=90):
+class SyntheticFundamentals:
+    name = "synthetic-fundamentals"
+
+    def __init__(self, snapshots):
+        self._snapshots = snapshots
+
+    def latest_fundamentals(self, symbol, forms, limit=8, **kwargs):
+        return self._snapshots[:limit]
+
+
+def make_bars(count=260):
     start = datetime(2024, 1, 1, tzinfo=UTC)
     retrieved_at = datetime(2025, 1, 1, tzinfo=UTC)
     bars = []
@@ -62,16 +79,37 @@ def make_bars(count=90):
 def main():
     bars = make_bars()
     as_of = bars[-1].timestamp
+    market = SyntheticMarketData(bars)
+    fundamentals = make_fundamentals()
+    rates = FixedMarketRateProvider(
+        MarketRateObservation(date(2024, 1, 1), 0.04, 0.05, "fixture://market-rates")
+    )
+    spreads = FixedCreditSpreadProvider(
+        CreditSpreadObservation(
+            date(2024, 1, 1),
+            ((float("inf"), 0.01),),
+            "fixture://credit-spreads",
+        )
+    )
     with TemporaryDirectory() as directory:
         artifacts = Path(directory)
         pipeline = InvestmentAgentPipeline(
             DataAgent(
-                SyntheticMarketData(bars),
+                market,
+                fundamentals=SyntheticFundamentals(fundamentals),
                 clock=lambda: datetime(2025, 1, 1, tzinfo=UTC),
             ),
             auditor=AuditorAgent(
                 JsonlAuditLog(artifacts / "audit.jsonl"),
                 JsonMemoryStore(artifacts / "memory"),
+            ),
+            fundamental_agent=FundamentalAgent(
+                MarketWACCBuilder(
+                    market,
+                    rates,
+                    minimum_beta_observations=2,
+                    credit_spread_provider=spreads,
+                )
             ),
         )
         profile = pipeline.create_profile(
@@ -92,18 +130,6 @@ def main():
                     start=bars[0].timestamp.date(),
                     end=as_of.date(),
                     as_of=as_of,
-                ),
-                fundamentals=FundamentalModelInputs(
-                    base_free_cash_flow=30,
-                    growth_rates=(0.08, 0.07, 0.06, 0.05, 0.04),
-                    discount_rate=0.10,
-                    terminal_growth_rate=0.025,
-                    net_debt=20,
-                    diluted_shares=10,
-                    roic=0.17,
-                    revenue_growth=0.08,
-                    operating_margin=0.21,
-                    debt_to_free_cash_flow=1.4,
                 ),
                 relative_valuation=RelativeValuationInputs(
                     target_metric_value=2.5,
@@ -147,6 +173,44 @@ def main():
                 "audit_valid": report.audit_receipt.chain_valid,
             }
         )
+
+
+def make_fundamentals():
+    retrieved_at = datetime(2025, 1, 1, tzinfo=UTC)
+
+    def annual(year, revenue, ebit, available_at):
+        return FundamentalSnapshot(
+            symbol="ACME",
+            period_start=date(year, 1, 1),
+            period_end=date(year, 12, 31),
+            filing_type="10-K",
+            currency="USD",
+            revenue=revenue,
+            ebit=ebit,
+            operating_cash_flow=35.0,
+            capital_expenditure=5.0,
+            cash_and_equivalents=15.0,
+            total_debt=20.0,
+            diluted_shares=10.0,
+            net_income=16.0,
+            pretax_income=21.0,
+            income_tax_expense=4.4,
+            interest_expense=1.0,
+            total_equity=90.0,
+            total_assets=140.0,
+            provenance=DataProvenance(
+                source="synthetic-fundamentals",
+                retrieved_at=retrieved_at,
+                available_at=available_at,
+                metadata={"company_sic": "3571"},
+            ),
+            period_basis="fiscal-year",
+        )
+
+    return (
+        annual(2023, 108.0, 22.0, datetime(2024, 2, 1, tzinfo=UTC)),
+        annual(2022, 100.0, 20.0, datetime(2023, 2, 1, tzinfo=UTC)),
+    )
 
 
 if __name__ == "__main__":

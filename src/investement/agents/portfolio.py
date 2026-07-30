@@ -21,7 +21,10 @@ class PortfolioConstructionAgent:
 
     def construct(self, inputs: PortfolioConstructionInputs) -> PortfolioPlan:
         returns = _normalized_mapping(inputs.returns)
-        metadata = {normalize_symbol(symbol): value for symbol, value in inputs.metadata.items()}
+        metadata = {
+            normalize_symbol(symbol): _normalized_metadata(value)
+            for symbol, value in inputs.metadata.items()
+        }
         current_weights = {
             normalize_symbol(symbol): float(value)
             for symbol, value in inputs.current_weights.items()
@@ -59,15 +62,24 @@ class PortfolioConstructionAgent:
                 constraints=constraints,
                 metadata={symbol: metadata[symbol] for symbol in eligible if symbol in metadata},
                 current_weights={symbol: current_weights.get(symbol, 0.0) for symbol in eligible},
+                return_dates=inputs.return_dates,
             ),
             backend=inputs.backend,
         )
-        rebalances = _rebalance_instructions(allocation.weights, current_weights)
+        mandatory_exits = set(excluded) & set(current_weights)
+        rebalances = _rebalance_instructions(
+            allocation.weights,
+            current_weights,
+            inputs.absolute_rebalance_band,
+            inputs.relative_rebalance_band,
+            mandatory_exits,
+        )
         return PortfolioPlan(
             allocation=allocation,
             rebalances=rebalances,
             eligible_assets=tuple(sorted(eligible)),
             excluded_assets=dict(sorted(excluded.items())),
+            implementation_turnover=_implementation_turnover(rebalances),
         )
 
 
@@ -112,18 +124,37 @@ def _constraints(
         asset_max_weights=dict(asset_limits),
         sector_max_weights=dict(profile.sector_max_weights),
         country_max_weights=dict(profile.country_max_weights),
+        asset_class_max_weights=dict(profile.asset_class_max_weights),
+        currency_max_weights=dict(profile.currency_max_weights),
+        max_annual_volatility=profile.max_portfolio_annual_volatility,
+    )
+
+
+def _normalized_metadata(value: AssetMetadata) -> AssetMetadata:
+    return AssetMetadata(
+        sector=value.sector.strip().casefold() if value.sector else None,
+        country=value.country.strip().casefold() if value.country else None,
+        asset_class=value.asset_class.strip().casefold() if value.asset_class else None,
+        currency=value.currency.strip().casefold() if value.currency else None,
     )
 
 
 def _rebalance_instructions(
     target_weights: Mapping[str, float],
     current_weights: Mapping[str, float],
+    absolute_band: float,
+    relative_band: float,
+    mandatory_exits: set[str],
 ) -> tuple[RebalanceInstruction, ...]:
     instructions = []
     for symbol in sorted(set(target_weights) | set(current_weights)):
         current = current_weights.get(symbol, 0.0)
         target = target_weights.get(symbol, 0.0)
         change = target - current
+        threshold = max(absolute_band, relative_band * max(target, current))
+        if current_weights and symbol not in mandatory_exits and abs(change) <= threshold:
+            target = current
+            change = 0.0
         if change > 1e-8:
             action = SignalAction.BUY
         elif change < -1e-8:
@@ -140,3 +171,13 @@ def _rebalance_instructions(
             )
         )
     return tuple(instructions)
+
+
+def _implementation_turnover(instructions: Sequence[RebalanceInstruction]) -> float:
+    if not instructions:
+        return 0.0
+    current_cash = max(0.0, 1.0 - sum(item.current_weight for item in instructions))
+    target_cash = max(0.0, 1.0 - sum(item.target_weight for item in instructions))
+    return 0.5 * (
+        sum(abs(item.change) for item in instructions) + abs(target_cash - current_cash)
+    )
