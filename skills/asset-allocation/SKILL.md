@@ -22,10 +22,31 @@ Apply profile caps by asset, sector, country, asset class and currency. If the
 profile volatility limit is breached, scale risky assets into cash. Report 95%
 historical VaR/Expected Shortfall, drawdown, risk contributions, effective number
 of assets and turnover. Rebalance only outside the configured absolute/relative
-band, except mandatory exits.
+band, except mandatory exits. Do not treat ticker count as diversification: use
+ETF holdings look-through and effective issuer count. For this personal
+portfolio, use 18-24 nominal instruments as a working range and target roughly
+25-40 effective issuers after look-through, subject to factor and sector caps.
+
+Historical maximum drawdown is a stress observation, not a point forecast. Keep
+the investor's 35% drawdown tolerance as a soft portfolio guardrail for the
+current equity-heavy policy, while risk can still hard-veto current liquidity,
+leverage, position, issuer, or event-risk breaches.
 
 The parameters elsewhere in this imported skill are research candidates. They
 do not override the tested local contract or the investor profile.
+
+## Monthly model tournament
+
+When assigning initial weights or rebalancing, compare constrained candidates:
+`1/N`, inverse volatility, minimum variance, mean-variance, risk parity, HRP,
+Black-Litterman, CVaR/downside-risk and turnover-aware allocation. Use a
+causal two-window walk-forward: fit candidates on an earlier estimation window,
+rank them on the immediately preceding validation window, then refit only the
+winner on data available at the rebalance cutoff. Score return together with
+volatility, maximum drawdown, Expected Shortfall, turnover and effective asset
+count. Record every candidate and the winner; never select using the future
+holding-period return. Black-Litterman requires explicit fundamental views in
+production; a trailing-return view is only a labeled proxy for diagnostics.
 
 ## Asset Allocation Theory
 

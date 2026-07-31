@@ -14,7 +14,7 @@ artifacts/
 audit/
 memory/
 output/
-resultados/**/cache/
+resultados/
 
 # Personal financial profiles stay local; only schemas and examples are versioned.
 profiles/*.local.json

@@ -89,6 +89,33 @@ class PriceBar:
 
 
 @dataclass(frozen=True)
+class QuoteSnapshot:
+    """Current quote kept separate from historical bars."""
+
+    symbol: str
+    last_price: float
+    bid: float | None
+    ask: float | None
+    volume: float | None
+    provenance: DataProvenance
+
+    def __post_init__(self) -> None:
+        if not self.symbol.strip():
+            raise ValueError("quote symbol cannot be empty")
+        require_finite(self.last_price, "last_price")
+        if self.last_price <= 0:
+            raise ValueError("last_price must be positive")
+        for name in ("bid", "ask", "volume"):
+            value = getattr(self, name)
+            if value is not None:
+                require_finite(value, name)
+                if value < 0:
+                    raise ValueError(f"{name} cannot be negative")
+        if self.bid is not None and self.ask is not None and self.ask < self.bid:
+            raise ValueError("ask cannot be below bid")
+
+
+@dataclass(frozen=True)
 class FundamentalSnapshot:
     symbol: str
     period_end: date

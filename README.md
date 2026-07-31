@@ -90,8 +90,15 @@ El baseline diario usa SMA 50/200 con banda neutral de 1%, momentum 12-1 y
 de 63 dias. Requiere 253 ruedas y emite una senal tactica separada (`favor_entry`,
 `hold`, `wait`, `tighten_risk` o `favor_exit`) con vigencia y confianza. La
 senal solo puede ejecutarse desde la barra siguiente y no reemplaza valuacion,
-construccion de portfolio ni veto de riesgo. La metodologia y sus fuentes estan
+construccion de portfolio ni veto de riesgo. La revision estrategica es mensual;
+la revision semanal solo actualiza timing o responde a eventos materiales. La
+metodologia y sus fuentes estan
 en [`investigacion/auditoria_modelo_tecnico.md`](investigacion/auditoria_modelo_tecnico.md).
+
+El comite usa 70% fundamental, 30% valuacion relativa y 0% tecnico para la
+direccion estrategica. Riesgo tambien pesa 0% y conserva veto. El tecnico queda
+como guia separada para entrar, esperar, escalonar o salir de una tesis ya
+aprobada.
 
 ### Agente de Valuacion Relativa
 
@@ -344,6 +351,29 @@ El nucleo determinista no necesita los extras:
   permite leer cuentas, saldos y posiciones.
 
 ### Configuracion del agente de datos
+
+El histórico de validación usa barras cerradas y reconstruye el retorno total con
+dividendos y splits. Para una revisión actual se puede consultar una quote
+separada, con timestamp y provenance:
+
+```bash
+.venv/bin/python -m investement.cli.live_quote KO PEP --source yfinance
+```
+
+Con Alpha Vantage, dejar `--entitlement` vacío consulta el último dato
+disponible compatible con una clave gratuita. `realtime` y `delayed` requieren
+el entitlement correspondiente del proveedor.
+
+`yfinance` es una fuente de investigación/personal-use. Para un feed US
+realtime o delayed con entitlement se puede configurar `ALPHA_VANTAGE_API_KEY`
+y ejecutar con `--source alpha-vantage`; la documentación del proveedor aclara
+que ese acceso depende del plan y las licencias de mercado. El backtest nunca
+usa una quote viva para completar un cutoff histórico.
+
+El walk-forward mensual acepta `--market-source auto|yfinance|alpha-vantage` y
+`--market-cross-check none|yfinance|alpha-vantage`. Si se configura una segunda
+fuente, el adaptador registra discrepancias en `MarketDataReconciliation`; no
+la sustituye silenciosamente.
 
 La identidad SEC local ya debe incluir nombre y email. Para usar el contraste de
 Alpha Vantage, crea una clave gratuita y guardala solamente en `.env.local`:

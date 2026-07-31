@@ -39,9 +39,9 @@ class OrchestrationTests(unittest.TestCase):
         decision = InvestmentCommittee().decide(
             (finding("fundamental", 0.9), finding("technical", -0.4), finding("risk", 0.2))
         )
-        self.assertEqual(decision.action, SignalAction.HOLD)
+        self.assertEqual(decision.action, SignalAction.BUY)
         self.assertIn("technical", decision.dissenting_agents)
-        self.assertLess(decision.confidence, 0.8)
+        self.assertEqual(decision.effective_weights["technical"], 0.0)
 
     def test_risk_veto_blocks_action(self):
         decision = InvestmentCommittee().decide(
@@ -62,9 +62,20 @@ class OrchestrationTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(sum(decision.effective_weights.values()), 1.0)
-        self.assertEqual(decision.effective_weights["fundamental"], 0.55)
-        self.assertEqual(decision.effective_weights["technical"], 0.20)
+        self.assertEqual(decision.effective_weights["fundamental"], 0.70)
+        self.assertEqual(decision.effective_weights["technical"], 0.0)
         self.assertEqual(decision.effective_weights["risk"], 0.0)
+
+    def test_technical_signal_cannot_reverse_a_strategic_recommendation(self):
+        bullish = InvestmentCommittee().decide(
+            (finding("fundamental", 0.7), finding("technical", -1.0))
+        )
+        bearish = InvestmentCommittee().decide(
+            (finding("fundamental", -0.7), finding("technical", 1.0))
+        )
+
+        self.assertEqual(bullish.action, SignalAction.BUY)
+        self.assertEqual(bearish.action, SignalAction.SELL)
 
     def test_committee_rejects_duplicate_agent_votes(self):
         with self.assertRaisesRegex(ValueError, "unique agents"):

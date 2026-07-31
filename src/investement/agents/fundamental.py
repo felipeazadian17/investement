@@ -29,14 +29,18 @@ class FundamentalAgent:
         wacc_builder: MarketWACCBuilder | None = None,
         projection_years: int = 7,
         long_run_nominal_growth: float = 0.025,
+        entry_buffer: float = 0.10,
     ) -> None:
         if projection_years < 5:
             raise ValueError("DCF convergence requires at least five projection years")
         if not 0 <= long_run_nominal_growth < 1:
             raise ValueError("long-run nominal growth must be between zero and one")
+        if not 0 <= entry_buffer < 1:
+            raise ValueError("entry buffer must be between zero and one")
         self._wacc_builder = wacc_builder
         self._projection_years = projection_years
         self._long_run_nominal_growth = long_run_nominal_growth
+        self._entry_buffer = entry_buffer
 
     def analyze(self, snapshot: AssetDataSnapshot) -> FundamentalAnalysis:
         if self._wacc_builder is None:
@@ -110,6 +114,11 @@ class FundamentalAgent:
             shares,
             capital_cost.risk_free_rate,
         )
+        conservative_value = _conservative_sensitivity_value(
+            sensitivity,
+            capital_cost.wacc,
+            terminal_growth,
+        )
 
         quality_score = _quality_score(
             current_roic,
@@ -122,13 +131,32 @@ class FundamentalAgent:
         valuation_gap = (dcf.value_per_share - snapshot.latest_price) / max(
             snapshot.latest_price, 1e-12
         )
+        dcf_margin_of_safety = (
+            dcf.value_per_share - snapshot.latest_price
+        ) / dcf.value_per_share
+        entry_price_ceiling = dcf.value_per_share * (1 - self._entry_buffer)
+        entry_buffer_passed = snapshot.latest_price <= entry_price_ceiling
         score = _clamp(0.70 * tanh(valuation_gap / 0.30) + 0.30 * quality_score)
+        if not entry_buffer_passed:
+            score = min(score, 0.0)
         risks = _model_risks(
             ltm,
             dcf.terminal_value_share,
             revenue_growth,
             projection.years,
         )
+        if conservative_value < snapshot.latest_price:
+            risks += (
+                "Fair value falls below market price when WACC rises 1% and terminal "
+                + "growth falls 0.5%; the base recommendation is sensitivity-dependent",
+            )
+        if not entry_buffer_passed:
+            risks += (
+                (
+                    f"DCF fair value does not provide the configured {self._entry_buffer:.1%} "
+                    "entry buffer; wait for a lower price or a stronger model revision"
+                ),
+            )
         confidence = _confidence(ltm, capital_cost.beta_observations, dcf.terminal_value_share)
         evidence = tuple(snapshot.evidence) + (
             EvidenceReference(
@@ -163,7 +191,8 @@ class FundamentalAgent:
             thesis=(
                 f"FCFF DCF estimates {dcf.value_per_share:.2f} per share versus "
                 f"{snapshot.latest_price:.2f}; WACC is {capital_cost.wacc:.2%}, "
-                f"terminal growth is {terminal_growth:.2%}, and quality is {quality_score:.2f}."
+                f"terminal growth is {terminal_growth:.2%}, quality is {quality_score:.2f}, "
+                f"and the entry ceiling is {entry_price_ceiling:.2f}."
             ),
             evidence=evidence,
             risks=risks,
@@ -192,6 +221,14 @@ class FundamentalAgent:
                 "stable_roic": stable_roic,
                 "terminal_growth_rate": terminal_growth,
                 "terminal_reinvestment_rate": terminal_growth / stable_roic,
+                "entry_buffer": self._entry_buffer,
+                "entry_price_ceiling": entry_price_ceiling,
+                "dcf_margin_of_safety": dcf_margin_of_safety,
+                "entry_buffer_passed": entry_buffer_passed,
+                "conservative_sensitivity_value": conservative_value,
+                "conservative_sensitivity_gap": (
+                    conservative_value / snapshot.latest_price - 1
+                ),
                 "enterprise_to_equity_adjustment": bridge.enterprise_to_equity_adjustment,
                 "lease_interest_reclassification": capital_cost.lease_interest_adjustment,
             },
@@ -363,6 +400,16 @@ def _sensitivity_axis(
     floor: float = 0.0001,
 ) -> tuple[float, ...]:
     return tuple(max(floor, center + offset * step) for offset in range(-radius, radius + 1))
+
+
+def _conservative_sensitivity_value(sensitivity, wacc, growth) -> float:
+    wacc_key = min(sensitivity, key=lambda value: abs(value - (wacc + 0.01)))
+    growth_values = sensitivity[wacc_key]
+    growth_key = min(growth_values, key=lambda value: abs(value - (growth - 0.005)))
+    value = growth_values[growth_key]
+    if value is None:
+        raise ValueError("conservative WACC/g sensitivity cell is not economically valid")
+    return value
 
 
 def _clamp(value: float) -> float:

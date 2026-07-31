@@ -7,11 +7,16 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from investement.data.normalize import normalize_symbol
-from investement.domain import DataProvenance, PriceBar
+from investement.domain import DataProvenance, PriceBar, QuoteSnapshot
 
 
 class AlphaVantageProvider:
-    """Normalized read-only adapter for Alpha Vantage daily OHLC data."""
+    """Normalized read-only adapter for Alpha Vantage market data.
+
+    Historical bars and live quotes are separate interfaces. Realtime US
+    quotes require the provider's appropriate exchange entitlement, so the
+    returned provenance is preserved for freshness checks.
+    """
 
     name = "alpha-vantage"
     endpoint = "https://www.alphavantage.co/query"
@@ -22,6 +27,7 @@ class AlphaVantageProvider:
         requester: Callable[[str, Mapping[str, str]], Mapping[str, Any]] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         outputsize: str = "compact",
+        adjusted: bool = False,
     ) -> None:
         if not api_key.strip():
             raise ValueError("Alpha Vantage api_key cannot be empty")
@@ -31,6 +37,44 @@ class AlphaVantageProvider:
         self._requester = requester or _get_json
         self._clock = clock
         self._outputsize = outputsize
+        self._adjusted = adjusted
+
+    def latest_quote(self, symbol: str, entitlement: str = "realtime") -> QuoteSnapshot:
+        if entitlement not in ("realtime", "delayed", ""):
+            raise ValueError("entitlement must be realtime, delayed, or empty")
+        normalized = normalize_symbol(symbol)
+        retrieved_at = self._clock()
+        params = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": normalized,
+            "apikey": self._api_key,
+        }
+        if entitlement:
+            params["entitlement"] = entitlement
+        payload = self._requester(self.endpoint, params)
+        values = payload.get("Global Quote")
+        if not isinstance(values, Mapping) or not values:
+            message = payload.get("Error Message") or payload.get("Information") or payload.get("Note")
+            raise RuntimeError(f"Alpha Vantage returned no quote: {message or 'unknown error'}")
+        return QuoteSnapshot(
+            symbol=normalized,
+            last_price=_number(values, "05. price"),
+            bid=_optional_number(values, "08. bid price"),
+            ask=_optional_number(values, "09. ask price"),
+            volume=_optional_number(values, "06. volume"),
+            provenance=DataProvenance(
+                source=self.name,
+                retrieved_at=retrieved_at,
+                available_at=retrieved_at,
+                raw_reference="https://www.alphavantage.co/documentation/#latestprice",
+                adjustments=("as-traded-quote",),
+                metadata={
+                    "function": "GLOBAL_QUOTE",
+                    "entitlement": entitlement,
+                    "latest_trading_day": values.get("07. latest trading day"),
+                },
+            ),
+        )
 
     def history(
         self,
@@ -45,10 +89,11 @@ class AlphaVantageProvider:
             raise ValueError("end must be later than start")
         normalized = normalize_symbol(symbol)
         retrieved_at = self._clock()
+        function = "TIME_SERIES_DAILY_ADJUSTED" if self._adjusted else "TIME_SERIES_DAILY"
         payload = self._requester(
             self.endpoint,
             {
-                "function": "TIME_SERIES_DAILY",
+                "function": function,
                 "symbol": normalized,
                 "outputsize": self._outputsize,
                 "apikey": self._api_key,
@@ -64,6 +109,8 @@ class AlphaVantageProvider:
             ) from exc
 
         bars = []
+        total_return_index = None
+        previous_close = None
         for day_text, values in sorted(series_items):
             day = date.fromisoformat(str(day_text))
             if day < start or day > end:
@@ -74,6 +121,13 @@ class AlphaVantageProvider:
                 continue
             if not isinstance(values, Mapping):
                 continue
+            close = _number(values, "4. close")
+            dividend = _optional_number(values, "7. dividend amount")
+            split = _optional_number(values, "8. split coefficient") or 1.0
+            if total_return_index is None or previous_close is None:
+                total_return_index = close
+            else:
+                total_return_index *= (close * split + (dividend or 0.0)) / previous_close
             bars.append(
                 PriceBar(
                     symbol=normalized,
@@ -81,8 +135,8 @@ class AlphaVantageProvider:
                     open=_number(values, "1. open"),
                     high=_number(values, "2. high"),
                     low=_number(values, "3. low"),
-                    close=_number(values, "4. close"),
-                    adjusted_close=_number(values, "4. close"),
+                    close=close,
+                    adjusted_close=total_return_index,
                     volume=_number(values, "5. volume"),
                     currency=None,
                     provenance=DataProvenance(
@@ -93,15 +147,21 @@ class AlphaVantageProvider:
                             "https://www.alphavantage.co/documentation/"
                             "#dailyadj"
                         ),
-                        adjustments=("raw-close", "no-dividend-adjustment"),
+                        adjustments=("causal-total-return-index", f"endpoint:{function}"),
                         metadata={
                             "requested_symbol": symbol,
                             "interval": interval,
-                            "function": "TIME_SERIES_DAILY",
+                            "function": function,
+                            "dividend": dividend,
+                            "stock_split": split if split != 1.0 else 0.0,
+                            "provider_adjusted_close_ignored": _optional_number(
+                                values, "5. adjusted close"
+                            ),
                         },
                     ),
                 )
             )
+            previous_close = close
         return bars
 
 
@@ -122,3 +182,10 @@ def _number(values: Mapping[str, Any], key: str) -> float:
     if not isfinite(result):
         raise ValueError(f"Alpha Vantage field {key} must be finite")
     return result
+
+
+def _optional_number(values: Mapping[str, Any], key: str) -> float | None:
+    value = values.get(key)
+    if value in (None, "", "None"):
+        return None
+    return _number(values, key)

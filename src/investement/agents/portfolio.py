@@ -40,7 +40,13 @@ class PortfolioConstructionAgent:
         excluded = {}
         asset_limits = {}
         for symbol, series in returns.items():
-            reason = _exclusion_reason(symbol, metadata.get(symbol), inputs.profile, decisions)
+            reason = _exclusion_reason(
+                symbol,
+                metadata.get(symbol),
+                inputs.profile,
+                decisions,
+                current_weights.get(symbol, 0.0),
+            )
             if reason is not None:
                 excluded[symbol] = reason
                 continue
@@ -98,6 +104,7 @@ def _exclusion_reason(
     metadata: AssetMetadata | None,
     profile: InvestorProfile,
     decisions: Mapping,
+    current_weight: float,
 ) -> str | None:
     if symbol in profile.prohibited_symbols:
         return "symbol prohibited by investor profile"
@@ -111,6 +118,12 @@ def _exclusion_reason(
         return "committee sell decision"
     if decision is not None and decision.risk_vetoed_by:
         return "committee recommendation blocked by risk veto"
+    if (
+        decision is not None
+        and current_weight <= 0
+        and decision.action is not SignalAction.BUY
+    ):
+        return f"{decision.action.value} decision cannot open a new position"
     return None
 
 

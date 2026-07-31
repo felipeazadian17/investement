@@ -72,6 +72,26 @@ class FixedMarketRateProvider:
         return self._observation
 
 
+class DatedMarketRateProvider:
+    """Selects the latest market-rate observation available at the cutoff."""
+
+    def __init__(self, observations: Sequence[MarketRateObservation]) -> None:
+        if not observations:
+            raise ValueError("at least one market-rate observation is required")
+        dated = sorted(observations, key=lambda item: item.observed_at)
+        if len({item.observed_at for item in dated}) != len(dated):
+            raise ValueError("market-rate observation dates must be unique")
+        self._observations = tuple(dated)
+
+    def rates(self, as_of: datetime) -> MarketRateObservation:
+        eligible = tuple(
+            item for item in self._observations if item.observed_at <= as_of.date()
+        )
+        if not eligible:
+            raise ValueError("no market-rate observation was available at as_of")
+        return eligible[-1]
+
+
 class FixedCreditSpreadProvider:
     def __init__(self, observation: CreditSpreadObservation) -> None:
         self._observation = observation
@@ -80,6 +100,26 @@ class FixedCreditSpreadProvider:
         if self._observation.observed_at > as_of.date():
             raise ValueError("credit-spread observation was unavailable at as_of")
         return self._observation
+
+
+class DatedCreditSpreadProvider:
+    """Selects a dated synthetic-credit table without introducing future data."""
+
+    def __init__(self, observations: Sequence[CreditSpreadObservation]) -> None:
+        if not observations:
+            raise ValueError("at least one credit-spread observation is required")
+        dated = sorted(observations, key=lambda item: item.observed_at)
+        if len({item.observed_at for item in dated}) != len(dated):
+            raise ValueError("credit-spread observation dates must be unique")
+        self._observations = tuple(dated)
+
+    def spreads(self, as_of: datetime) -> CreditSpreadObservation:
+        eligible = tuple(
+            item for item in self._observations if item.observed_at <= as_of.date()
+        )
+        if not eligible:
+            raise ValueError("no credit-spread observation was available at as_of")
+        return eligible[-1]
 
 
 class DamodaranMarketRateProvider:

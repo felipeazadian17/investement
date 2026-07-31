@@ -279,6 +279,17 @@ class AgentTests(unittest.TestCase):
             fundamentals.model_assumptions["initial_revenue_growth"],
             0.10,
         )
+        self.assertAlmostEqual(fundamentals.model_assumptions["entry_buffer"], 0.10)
+        self.assertIn("entry_price_ceiling", fundamentals.model_assumptions)
+        strict_fundamentals = _fundamental_agent(
+            FakeMarketDataProvider(snapshot.bars), entry_buffer=0.99
+        ).analyze(snapshot)
+        self.assertFalse(strict_fundamentals.model_assumptions["entry_buffer_passed"])
+        self.assertLessEqual(strict_fundamentals.finding.score, 0.0)
+        self.assertGreater(
+            fundamentals.model_assumptions["conservative_sensitivity_value"],
+            0,
+        )
         self.assertGreaterEqual(technical.rsi, 0)
         self.assertLessEqual(technical.rsi, 100)
         self.assertEqual(relative.signal.action, SignalAction.BUY)
@@ -392,6 +403,27 @@ class AgentTests(unittest.TestCase):
         self.assertIn("C", plan.excluded_assets)
         self.assertIn("D", plan.excluded_assets)
         self.assertAlmostEqual(sum(plan.allocation.weights.values()), 0.95)
+
+    def test_initial_portfolio_only_opens_committee_buys(self):
+        profile = _profile_agent().create(_profile_request(max_position_weight=0.60))
+        plan = PortfolioConstructionAgent().construct(
+            PortfolioConstructionInputs(
+                profile=profile,
+                returns={
+                    "A": (0.01, 0.02, -0.01, 0.01),
+                    "B": (0.001, 0.002, 0.0015, 0.0025),
+                    "C": (0.003, -0.001, 0.002, 0.001),
+                },
+                decisions={
+                    "A": _decision("A", SignalAction.BUY),
+                    "B": _decision("B", SignalAction.BUY),
+                    "C": _decision("C", SignalAction.HOLD),
+                },
+            )
+        )
+
+        self.assertEqual(set(plan.eligible_assets), {"A", "B"})
+        self.assertIn("cannot open", plan.excluded_assets["C"])
 
     def test_auditor_redacts_secrets_and_keeps_a_valid_hash_chain(self):
         with TemporaryDirectory() as directory:
@@ -638,7 +670,7 @@ def _fundamental_snapshots() -> tuple[FundamentalSnapshot, ...]:
     )
 
 
-def _fundamental_agent(market_data) -> FundamentalAgent:
+def _fundamental_agent(market_data, entry_buffer: float = 0.10) -> FundamentalAgent:
     rates = FixedMarketRateProvider(
         MarketRateObservation(
             observed_at=date(2024, 1, 1),
@@ -660,7 +692,8 @@ def _fundamental_agent(market_data) -> FundamentalAgent:
             rate_provider=rates,
             minimum_beta_observations=2,
             credit_spread_provider=spreads,
-        )
+        ),
+        entry_buffer=entry_buffer,
     )
 
 

@@ -32,6 +32,12 @@ eso la shortlist ordena relevancia tecnica y no popularidad bruta. Las skills
 descargadas fueron leidas antes de usarlas y no se incorporo codigo de los
 repositorios de referencia al nucleo.
 
+Las conclusiones de las validaciones point-in-time, walk-forward y stress se
+consolidan en
+[`ensenanzas_y_reglas_de_diseno.md`](ensenanzas_y_reglas_de_diseno.md). Los
+artefactos de corridas se mantienen fuera del repositorio y no son una fuente
+de verdad del producto.
+
 ## Shortlist principal
 
 ### TradingAgents

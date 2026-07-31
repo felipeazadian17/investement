@@ -101,6 +101,22 @@ presenta como precision confirmada y genera riesgo en el hallazgo.
 La sensibilidad y los escenarios son herramientas expresas del
 [CFA Financial Analysis Techniques](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/financial-analysis-techniques).
 
+## Buffer de entrada
+
+El valor intrinseco no se trata como precio automatico de compra. El agente
+fundamental aplica por defecto un buffer configurable de 10%:
+
+```text
+precio maximo de entrada = DCF por accion * (1 - buffer)
+```
+
+Si el precio supera ese techo, el score fundamental no puede ser positivo y la
+accion queda en `hold` salvo que otro proceso documente una tesis distinta. El
+buffer puede probarse en 5%, 10% y 20%; no se calibra con la misma ventana que
+se usa para evaluar resultados. Para exigir upside de 10% sobre el precio de
+compra, la forma equivalente es `DCF >= precio * 1.10`, que representa 9.09%
+de margen medido sobre el DCF.
+
 ## Seleccion del modelo
 
 El FCFF DCF se bloquea para:

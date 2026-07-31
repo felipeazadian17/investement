@@ -12,8 +12,9 @@ costos, multiples subperiodos y multiples activos.
 
 El analisis tecnico no decide si una empresa merece ser comprada. Describe el
 regimen de precio y aporta una senal tactica de entrada, espera, reduccion o
-salida al comite. La valuacion, el perfil, el portfolio y el riesgo conservan sus
-propias decisiones y el riesgo mantiene poder de veto.
+salida. Su peso direccional estrategico es cero. La valuacion, el perfil, el
+portfolio y el riesgo conservan sus propias decisiones y el riesgo mantiene
+poder de veto.
 
 ## Fuentes principales
 
@@ -140,6 +141,15 @@ calidad.
 8. Sensibilidad alrededor del baseline, no busqueda del punto maximo.
 9. Reality Check, deflated Sharpe u otra correccion si se prueban muchas reglas.
 10. Paper trading antes de cualquier uso operativo.
+
+## Resultado piloto 2024
+
+En 88 observaciones empresa-mes el score tecnico tuvo hit rate direccional de
+57,35% y retorno medio de 1,23%, pero IC mensual de solo 0,029. Esto es
+compatible con capturar el regimen alcista general y no con seleccionar la
+mejor empresa. Retrasar la ejecucion cinco ruedas no deterioro materialmente el
+resultado integrado, pero una sola muestra no permite elegir ese delay. Se
+mantiene peso estrategico cero y uso semanal de timing.
 
 No promover un cambio si solo mejora retorno total. Debe sostener calidad de
 senal neta de costos, riesgo, estabilidad temporal y explicabilidad.

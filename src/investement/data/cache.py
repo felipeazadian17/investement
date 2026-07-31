@@ -84,6 +84,13 @@ class CachedMarketDataProvider:
         self._cache.save(key, bars, now)
         return bars
 
+    def latest_quote(self, symbol: str):
+        """Delegate live quotes without caching them as historical bars."""
+        latest_quote = getattr(self._provider, "latest_quote", None)
+        if latest_quote is None:
+            raise RuntimeError(f"provider {self._provider.name} does not expose live quotes")
+        return latest_quote(symbol)
+
 
 def _encode_bar(bar: PriceBar) -> dict:
     return {

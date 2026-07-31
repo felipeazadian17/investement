@@ -194,6 +194,27 @@ class DataProviderTests(unittest.TestCase):
         bars = provider.history("AAPL", date(2024, 1, 1), date(2024, 1, 2))
         self.assertEqual(bars, [])
 
+    def test_alpha_vantage_exposes_a_provenanced_live_quote(self):
+        provider = AlphaVantageProvider(
+            "key",
+            requester=lambda url, params: {
+                "Global Quote": {
+                    "01. symbol": "IBM",
+                    "05. price": "190.25",
+                    "06. volume": "1234",
+                    "07. latest trading day": "2024-01-03",
+                    "08. bid price": "190.20",
+                    "09. ask price": "190.30",
+                }
+            },
+            clock=lambda: datetime(2024, 1, 4, 15, tzinfo=UTC),
+        )
+        quote = provider.latest_quote("ibm", entitlement="delayed")
+        self.assertEqual(quote.symbol, "IBM")
+        self.assertEqual(quote.last_price, 190.25)
+        self.assertEqual(quote.provenance.metadata["entitlement"], "delayed")
+        self.assertEqual(quote.provenance.available_at, datetime(2024, 1, 4, 15, tzinfo=UTC))
+
     def test_edgar_sets_identity_and_preserves_filing_availability(self):
         identities = []
         companies = []

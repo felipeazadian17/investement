@@ -155,6 +155,24 @@ Require all of the following:
 
 An exit multiple is a cross-check, not a way to hide an invalid perpetuity.
 
+## 7.5 Apply an explicit entry buffer
+
+Fair value is not an entry price. For a long-only buy signal, require a margin
+of safety after the DCF is complete:
+
+```text
+entry_price_ceiling = DCF_value_per_share * (1 - entry_buffer)
+buy only if market_price <= entry_price_ceiling
+```
+
+Use a configurable 5%-10% buffer for a mature, well-supported model and a
+higher threshold when terminal value, data quality or forecast uncertainty is
+material. Do not use `DCF * (1 + buffer) > price` as a safety rule: it permits a
+purchase above fair value. If the desired interpretation is a 10% upside from
+the purchase price, use `DCF >= price * 1.10`, equivalent to a 9.09% margin of
+safety measured against DCF fair value. A failed buffer should produce `hold`,
+not an automatic sell, and should be visible in the audit output.
+
 ## 7. Bridge Enterprise Value to Common Equity
 
 ```text
@@ -187,6 +205,11 @@ Also report terminal-value share, implied EV multiples, valuation versus market
 price, observed cash conversion and the effect of the complete equity bridge.
 Large deviations are prompts to inspect assumptions, not reasons to force the
 DCF toward the current enterprise value.
+
+Record the conservative cell at WACC +1% and terminal growth -0.5%. If this value
+falls below market, label the base recommendation sensitivity-dependent. Do not
+automatically change the buy threshold from a short pilot; require broader
+out-of-sample evidence.
 
 ## Output
 

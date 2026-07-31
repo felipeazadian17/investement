@@ -69,13 +69,57 @@ impuestos y beneficio esperado del rebalanceo.
   exposiciones agregadas, y deja score neutral cuando aprueba.
 - Comparables y DCF llegan al comite como factores separados; el score relativo
   ya no vuelve a contar el DCF blended.
-- Pesos del comite: fundamental 55%, comparables 25%, tecnico 20%, riesgo 0% mas
-  veto. La dispersion reduce confianza y baja a `hold` una accion poco confiable.
+- Pesos del comite estrategico: fundamental 70%, comparables 30%, tecnico 0% y
+  riesgo 0% mas veto. La dispersion reduce confianza y baja a `hold` una accion
+  poco confiable. El tecnico conserva una salida independiente para timing.
+- Una cartera inicial solo abre activos con decision `buy`; `hold` puede
+  conservar una posicion existente pero nunca iniciar una nueva.
+- Cadencia: revision estrategica mensual, chequeo tactico semanal y reapertura
+  inmediata solo ante un evento material de tesis o riesgo.
+
+## Validacion ejecutada
+
+El piloto 2024 de 11 ventanas mensuales, ocho companias y ejecucion `t+1` tuvo
+88/88 DCF y comparables completos, sin violaciones de look-ahead. Sus
+conclusiones se consolidan en
+[`ensenanzas_y_reglas_de_diseno.md`](ensenanzas_y_reglas_de_diseno.md); los
+artefactos de corrida no forman parte del repositorio productivo.
+
+El torneo multi-modelo de cartera agrega `1/N`, inverse volatility, minimum
+variance, mean-variance, risk parity, hierarchical risk parity, un proxy de
+Black-Litterman, un presupuesto de riesgo CVaR y una variante turnover-aware.
+Cada corte mensual estima pesos con una ventana previa, evalua los candidatos en
+otra ventana anterior al corte y solo despues refittea el ganador para el mes
+siguiente. En la corrida 2016-2026 con la nueva cartera de 18 instrumentos,
+la politica estrategica fija alcanzo 19.86% anualizado frente a 18.38% del
+selector adaptativo y 14.66% de SPY. El selector tuvo 13.75 de turnover contra
+2.91 de la politica fija; por lo tanto queda como benchmark auditable y no se
+promueve automaticamente. La seleccion mensual fue: turnover-aware 43 meses,
+mean-variance 34, equal-weight 19, minimum-variance 13, risk-parity 5,
+hierarchical-risk-parity 4 y Black-Litterman proxy 3.
+
+La ampliacion corrigio la baja cantidad de instrumentos y el sesgo explicito a
+dividendos: la cartera ahora tiene 18 tickers, 10% en instrumentos de dividendos
+defensivos y 30% en mega-cap de crecimiento individuales, ademas de exposicion
+indirecta via ETFs. Esto no equivale a 18 emisores independientes: VTI, QQQ,
+QUAL, VTV y SCHD pueden repetir holdings. Falta implementar el look-through de
+holdings y caps por emisor/sector/factor antes de considerar la politica lista
+para ejecutar.
+
+La politica estrategica tuvo 17.92% de volatilidad anual y -30.02% de maximo
+drawdown en esa ventana. Por lo tanto respeta aproximadamente el limite de
+volatilidad del perfil, pero no el drawdown maximo de 20% si ese parametro se
+interpreta como restriccion dura.
+
+El detalle numerico fue usado para construir el documento permanente de
+ensenanzas. Los CSV y JSON de la corrida se eliminaron del repositorio porque
+son salidas fechadas, no componentes reutilizables del sistema.
 
 ## Validacion pendiente antes de usar capital
 
 1. Retornos alineados por calendario y moneda, sin forward-fill de activos cerrados.
-2. Walk-forward contra `1/N`, inverse volatility y portfolio actual.
+2. Ampliar walk-forward a un universo historico sin survivorship bias y a
+   horizontes 3/6/12 meses; el piloto mensual no calibra alpha de valor.
 3. Costos, impuestos uruguayos, spread y turnover realizados.
 4. Stress historico e hipotetico por factores; opciones requieren delta, gamma y vega.
 5. Bootstrap de pesos, risk contributions y estabilidad de caps.

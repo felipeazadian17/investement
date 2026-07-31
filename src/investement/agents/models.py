@@ -12,6 +12,7 @@ from investement.domain import (
     MarketDataReconciliation,
     OptionChainSnapshot,
     PriceBar,
+    QuoteSnapshot,
     SignalAction,
     require_aware,
 )
@@ -281,6 +282,7 @@ class AssetDataRequest:
     include_fundamentals: bool = True
     include_fund_data: bool = False
     option_expiration: date | None = None
+    include_live_quote: bool = False
 
     def __post_init__(self) -> None:
         if not self.symbol.strip() or not self.interval.strip():
@@ -307,6 +309,7 @@ class AssetDataSnapshot:
     fund: FundSnapshot | None = None
     option_chain: OptionChainSnapshot | None = None
     reconciliation: MarketDataReconciliation | None = None
+    live_quote: QuoteSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not self.symbol.strip() or not self.bars or not self.evidence:
@@ -325,6 +328,8 @@ class AssetDataSnapshot:
             raise ValueError("snapshot contains fund data that was unavailable at as_of")
         if self.option_chain is not None and self.option_chain.provenance.available_at > self.as_of:
             raise ValueError("snapshot contains option data that was unavailable at as_of")
+        if self.live_quote is not None and self.live_quote.provenance.available_at > self.as_of:
+            raise ValueError("snapshot contains a live quote that was unavailable at as_of")
 
     @property
     def latest_price(self) -> float:

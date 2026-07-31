@@ -10,19 +10,26 @@ from investement.orchestration.models import AgentFinding, CommitteeDecision
 class CommitteePolicy:
     agent_weights: Mapping[str, float] = field(
         default_factory=lambda: {
-            "fundamental": 0.55,
-            "relative-valuation": 0.25,
-            "technical": 0.20,
+            "fundamental": 0.70,
+            "relative-valuation": 0.30,
+            "technical": 0.0,
             "risk": 0.0,
         }
     )
     minimum_actionable_confidence: float = 0.35
+    buy_threshold: float = 0.35
+    reduce_threshold: float = -0.10
+    sell_threshold: float = -0.35
 
     def __post_init__(self) -> None:
         if any(not isfinite(value) or value < 0 for value in self.agent_weights.values()):
             raise ValueError("committee agent weights must be finite and non-negative")
         if not 0 <= self.minimum_actionable_confidence <= 1:
             raise ValueError("minimum_actionable_confidence must be between zero and one")
+        if not -1 <= self.sell_threshold < self.reduce_threshold < self.buy_threshold <= 1:
+            raise ValueError(
+                "committee thresholds must satisfy sell < reduce < buy within [-1, 1]"
+            )
 
 
 class InvestmentCommittee:
@@ -61,7 +68,7 @@ class InvestmentCommittee:
             else 0.0
         )
         vetoes = tuple(finding.agent for finding in findings if finding.risk_veto)
-        suggested_action = _action_for_score(score)
+        suggested_action = _action_for_score(score, self._policy)
         action = SignalAction.HOLD if vetoes else suggested_action
         dispersion = sqrt(
             sum(
@@ -106,12 +113,12 @@ class InvestmentCommittee:
         )
 
 
-def _action_for_score(score: float) -> SignalAction:
-    if score >= 0.35:
+def _action_for_score(score: float, policy: CommitteePolicy) -> SignalAction:
+    if score >= policy.buy_threshold:
         return SignalAction.BUY
-    if score >= -0.10:
+    if score >= policy.reduce_threshold:
         return SignalAction.HOLD
-    if score >= -0.35:
+    if score >= policy.sell_threshold:
         return SignalAction.REDUCE
     return SignalAction.SELL
 

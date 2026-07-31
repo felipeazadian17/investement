@@ -2,7 +2,13 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Protocol
 
-from investement.domain import FundamentalSnapshot, FundSnapshot, OptionChainSnapshot, PriceBar
+from investement.domain import (
+    FundamentalSnapshot,
+    FundSnapshot,
+    OptionChainSnapshot,
+    PriceBar,
+    QuoteSnapshot,
+)
 
 
 class MarketDataProvider(Protocol):
@@ -15,6 +21,12 @@ class MarketDataProvider(Protocol):
         end: date,
         interval: str = "1d",
     ) -> Sequence[PriceBar]: ...
+
+
+class LiveQuoteProvider(Protocol):
+    name: str
+
+    def latest_quote(self, symbol: str) -> QuoteSnapshot: ...
 
 
 class FilingProvider(Protocol):

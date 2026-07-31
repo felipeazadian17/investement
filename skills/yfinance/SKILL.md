@@ -5,6 +5,15 @@ category: data-source
 ---
 # yfinance
 
+## Investement Project Usage
+
+Within this project, use `DataAgent` historical bars for point-in-time analysis
+and `investement.cli.live_quote` only for current review quotes. A live quote
+must never be inserted into an historical cutoff. Yahoo remains a
+research/personal-use source; use the optional Alpha Vantage adapter when an
+appropriately entitled realtime or delayed US feed is configured, and preserve
+the returned provenance and freshness timestamp.
+
 ## Overview
 
 yfinance is an open-source Python wrapper for Yahoo Finance, providing global market data (US stocks, HK stocks, ETFs, indices) including historical and real-time quotes. **Completely free, no registration or API key required.**

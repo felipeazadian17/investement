@@ -43,6 +43,12 @@ class ValuationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DCFInputs((100.0,), 0.03, 0.03, 0.0, 10.0)
 
+    def test_valuation_signal_requires_margin_of_safety_for_entry(self):
+        entry = valuation_signal(89.0, 100.0, confidence=0.8, required_margin=0.10)
+        wait = valuation_signal(91.0, 100.0, confidence=0.8, required_margin=0.10)
+        self.assertEqual(entry.action, SignalAction.BUY)
+        self.assertEqual(wait.action, SignalAction.HOLD)
+
     def test_projection_and_sensitivity_are_monotonic(self):
         projected = project_cash_flows(100.0, (0.10, 0.05))
         self.assertEqual(projected, (110.00000000000001, 115.50000000000001))

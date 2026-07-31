@@ -13,6 +13,12 @@ Shortfall, drawdown, effective assets and stability by regime. Read
 `../../investigacion/auditoria_portfolio_riesgo_gobernanza.md` before promoting
 an optimizer, committee weight or rebalancing band.
 
+For this investor, rebalance strategic recommendations monthly and test a
+five-session execution delay as a weekly-review stress. One-month returns test
+pipeline causality and tactical behavior; they are not enough to validate a
+long-horizon value thesis. Add 3/6/12-month outcomes before calibrating valuation
+weights or margins of safety.
+
 ## Overview
 
 Use this skill when a user reports that a backtest failed, raised an error, or produced poor results.

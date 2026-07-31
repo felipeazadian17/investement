@@ -10,6 +10,8 @@ description: Audit or modify the project's daily technical model, tactical entry
 Treat technical analysis as a supporting market-state signal. Never let it
 override a risk veto, portfolio constraint, or fundamental thesis by itself.
 Keep the continuous technical score separate from the tactical timing action.
+Its strategic committee weight is zero. Review timing weekly or after a material
+event; do not require continuous monitoring.
 
 Before changing parameters or behavior, read
 [`../../investigacion/auditoria_modelo_tecnico.md`](../../investigacion/auditoria_modelo_tecnico.md).
@@ -82,3 +84,7 @@ operational use.
 
 Reject a change that improves only in-sample total return or depends on same-bar
 execution, unadjusted corporate actions, unavailable data, or one isolated asset.
+
+The 2024 pilot produced positive one-month directional performance but near-zero
+cross-sectional IC. Treat this as regime information, not evidence that technical
+scores should select stocks or regain strategic committee weight.

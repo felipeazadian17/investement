@@ -10,9 +10,10 @@ Read both `../../investigacion/auditoria_portfolio_riesgo_gobernanza.md` and
 
 ## Committee
 
-Keep independent evidence separate. DCF/fundamental has 55% policy weight,
-comparable valuation 25%, technical 20%, and risk zero directional weight plus
-veto. Do not score a blended DCF/comparable value again beside the DCF.
+Keep independent evidence separate. DCF/fundamental has 70% strategic policy
+weight, comparable valuation 30%, technical zero directional weight, and risk
+zero directional weight plus veto. Technical analysis remains separate timing
+guidance. Do not score a blended DCF/comparable value again beside the DCF.
 
 Normalize weights across available findings, multiply by calibrated confidence,
 record effective weights and material dissent, and reduce confidence for
@@ -22,6 +23,10 @@ below the policy floor. A veto always blocks action.
 Parameters are governance policy, not empirically optimal constants. Recalibrate
 only with out-of-sample decision outcomes and preserve the old policy/version for
 comparison.
+
+Use a monthly strategic review and a weekly timing review. A material filing,
+thesis break or hard risk event may trigger an earlier review. An initial
+portfolio opens only `buy` recommendations; `hold` never initiates a position.
 
 ## Workflow
 

@@ -33,6 +33,7 @@ dev = ["pytest>=7", "ruff>=0.5"]
 
 [project.scripts]
 investement-snaptrade-connect = "investement.cli.snaptrade_connect:main"
+investement-live-quote = "investement.cli.live_quote:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

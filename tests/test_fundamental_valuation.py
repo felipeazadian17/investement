@@ -3,9 +3,13 @@ from datetime import UTC, date, datetime
 
 from investement.domain import DataProvenance, FundamentalSnapshot
 from investement.valuation import (
+    CreditSpreadObservation,
     DamodaranCreditSpreadProvider,
     DamodaranMarketRateProvider,
+    DatedCreditSpreadProvider,
+    DatedMarketRateProvider,
     DCFInputs,
+    MarketRateObservation,
     OperatingProjectionInputs,
     build_ltm_fundamentals,
     discounted_cash_flow,
@@ -17,6 +21,30 @@ from investement.valuation import (
 
 
 class FundamentalValuationTests(unittest.TestCase):
+    def test_dated_market_inputs_select_latest_observation_before_cutoff(self):
+        rates = DatedMarketRateProvider(
+            (
+                MarketRateObservation(date(2022, 12, 31), 0.038, 0.059, "fixture://2022"),
+                MarketRateObservation(date(2023, 12, 31), 0.039, 0.046, "fixture://2023"),
+            )
+        )
+        spreads = DatedCreditSpreadProvider(
+            (
+                CreditSpreadObservation(
+                    date(2023, 1, 1), ((float("inf"), 0.01),), "fixture://spreads-2023"
+                ),
+                CreditSpreadObservation(
+                    date(2024, 1, 1), ((float("inf"), 0.008),), "fixture://spreads-2024"
+                ),
+            )
+        )
+        cutoff = datetime(2023, 6, 30, tzinfo=UTC)
+
+        self.assertEqual(rates.rates(cutoff).source_url, "fixture://2022")
+        self.assertEqual(spreads.spreads(cutoff).source_url, "fixture://spreads-2023")
+        with self.assertRaisesRegex(ValueError, "available"):
+            rates.rates(datetime(2020, 1, 1, tzinfo=UTC))
+
     def test_ltm_uses_fy_plus_current_ytd_minus_prior_ytd(self):
         annual = _snapshot(
             date(2024, 1, 1),

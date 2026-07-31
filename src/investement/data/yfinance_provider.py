@@ -12,6 +12,7 @@ from investement.domain import (
     OptionChainSnapshot,
     OptionContractSnapshot,
     PriceBar,
+    QuoteSnapshot,
     require_aware,
 )
 
@@ -144,6 +145,34 @@ class YFinanceProvider:
             )
             previous_close = close
         return bars
+
+    def latest_quote(self, symbol: str) -> QuoteSnapshot:
+        normalized = normalize_symbol(symbol)
+        retrieved_at = self._clock()
+        ticker = self._ticker(normalized)
+        try:
+            info = ticker.fast_info
+            last_price = _mapping_value(info, "lastPrice", "last_price")
+            bid = _optional_mapping_value(info, "bid")
+            ask = _optional_mapping_value(info, "ask")
+            volume = _optional_mapping_value(info, "lastVolume", "regularMarketVolume")
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Yahoo did not return a current quote for {normalized}") from exc
+        return QuoteSnapshot(
+            symbol=normalized,
+            last_price=last_price,
+            bid=bid,
+            ask=ask,
+            volume=volume,
+            provenance=DataProvenance(
+                source=self.name,
+                retrieved_at=retrieved_at,
+                available_at=retrieved_at,
+                raw_reference=f"https://finance.yahoo.com/quote/{normalized}",
+                adjustments=("provider-current-quote",),
+                metadata={"current_snapshot_only": True},
+            ),
+        )
 
     def fund_snapshot(self, symbol: str, as_of: datetime) -> FundSnapshot | None:
         normalized = normalize_symbol(symbol)
@@ -405,6 +434,28 @@ def _mapping_text(values: dict, *keys: str) -> str | None:
         if value is not None:
             return value
     return None
+
+
+def _mapping_value(values: Any, *keys: str) -> float:
+    for key in keys:
+        try:
+            value = values[key]
+        except (KeyError, TypeError):
+            continue
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(result) and result > 0:
+            return result
+    raise ValueError(f"quote is missing a positive value for {', '.join(keys)}")
+
+
+def _optional_mapping_value(values: Any, *keys: str) -> float | None:
+    try:
+        return _mapping_value(values, *keys)
+    except ValueError:
+        return None
 
 
 def _bar_available_at(timestamp: datetime, interval: str) -> datetime:

@@ -64,11 +64,15 @@ literales del upstream.
   validar concentracion y capital invertido.
 - Todo backtest aplica al menos un bar de delay y costos configurables.
 - El agente tecnico usa un baseline diario fijo y separa el score de una senal
-  tactica no vinculante; cualquier cambio requiere validacion walk-forward.
+  tactica no vinculante; su peso estrategico es cero y cualquier cambio requiere
+  validacion walk-forward.
 - Portfolio usa inverse volatility restringido como baseline, cash dinamico para
   el limite de volatilidad, tail risk, risk contributions y bandas de rebalanceo.
 - Riesgo aprobado tiene score neutral; hard breaches conservan veto.
-- El comite evita doble conteo DCF/comparables y registra pesos efectivos.
+- El comite evita doble conteo DCF/comparables, usa 70/30/0 para
+  fundamental/relativa/tecnica y registra pesos efectivos.
+- La revision estrategica es mensual y el timing se revisa semanalmente o ante
+  eventos materiales.
 - SnapTrade, audit log y workflows aplican redaccion en profundidad, retries
   acotados, versionado y validacion anticipada de dependencias.
 - El workflow registra inicios, resultados y fallas en un log encadenado.

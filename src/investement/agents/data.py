@@ -95,6 +95,16 @@ class DataAgent:
         corporate_actions = _corporate_actions(bars)
         fund = None
         option_chain = None
+        live_quote = None
+        if request.include_live_quote:
+            latest_quote = getattr(self._market_data, "latest_quote", None)
+            if latest_quote is None:
+                raise RuntimeError(
+                    f"market provider {self._market_data.name} does not expose live quotes"
+                )
+            live_quote = latest_quote(symbol)
+            if live_quote.provenance.available_at > request.as_of:
+                raise ValueError("live quote was not available at the requested as_of")
         if self._instruments is not None and request.include_fund_data:
             fund = self._instruments.fund_snapshot(symbol, request.as_of)
         if self._instruments is not None and request.option_expiration is not None:
@@ -111,6 +121,8 @@ class DataAgent:
             evidence.append(_provenance_evidence(fund.provenance, symbol, "fund"))
         if option_chain is not None:
             evidence.append(_provenance_evidence(option_chain.provenance, symbol, "options"))
+        if live_quote is not None:
+            evidence.append(_provenance_evidence(live_quote.provenance, symbol, "live-quote"))
         retrieved_at = self._clock()
         if retrieved_at.tzinfo is None or retrieved_at.utcoffset() is None:
             raise ValueError("data agent clock must return a timezone-aware datetime")
@@ -126,6 +138,7 @@ class DataAgent:
             fund=fund,
             option_chain=option_chain,
             reconciliation=getattr(self._market_data, "last_reconciliation", None),
+            live_quote=live_quote,
         )
 
 
