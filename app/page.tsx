@@ -4,6 +4,7 @@ import {
   Activity,
   BarChart3,
   Clock3,
+  Layers3,
   LineChart,
   RefreshCw,
   WalletCards
@@ -21,6 +22,7 @@ import {
   YAxis
 } from "recharts";
 import {
+  buildCompositeBenchmark,
   buildPortfolioView,
   buildSimilarPerformance,
   correlation,
@@ -39,6 +41,7 @@ const ranges = [
 
 export default function Home() {
   const [range, setRange] = useState("1y");
+  const [activeTab, setActiveTab] = useState<"performance" | "decomposition">("performance");
   const [portfolioConfig, setPortfolioConfig] = useState<PortfolioConfig | null>(null);
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +52,7 @@ export default function Home() {
     const all = [
       portfolioConfig.benchmark,
       ...portfolioConfig.holdings.map((holding) => holding.symbol),
+      ...portfolioConfig.holdings.map((holding) => holding.benchmark).filter(Boolean),
       ...portfolioConfig.similarPortfolios.flatMap((portfolio) =>
         portfolio.holdings.map((holding) => holding.symbol)
       )
@@ -116,6 +120,13 @@ export default function Home() {
   const view = market && portfolioConfig
     ? buildPortfolioView(portfolioConfig.holdings, market.series, benchmark)
     : null;
+  const compositeBenchmark =
+    market && portfolioConfig ? buildCompositeBenchmark(portfolioConfig.holdings, market.series) : [];
+  const performanceData =
+    view?.performance.map((point) => {
+      const composite = compositeBenchmark.find((item) => item.date === point.date);
+      return { ...point, benchmark: composite?.portfolio };
+    }) ?? [];
   const portfolioReturns = view ? dailyReturns(view.performance) : [];
 
   const comparisons =
@@ -141,7 +152,7 @@ export default function Home() {
           </div>
           <div>
             <h1>Investement Portfolio</h1>
-            <p>Dashboard en tiempo real contra {portfolioConfig?.benchmark ?? "benchmark"}</p>
+            <p>Dashboard en tiempo real con benchmark ponderado por exposición</p>
           </div>
         </div>
         <div className="toolbar">
@@ -161,6 +172,25 @@ export default function Home() {
 
       <section className="content">
         {error ? <div className="error">{error}</div> : null}
+        <nav className="tabs" aria-label="Vistas del portfolio">
+          <button
+            className={activeTab === "performance" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveTab("performance")}
+          >
+            <LineChart size={16} />
+            Rendimiento
+          </button>
+          <button
+            className={activeTab === "decomposition" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveTab("decomposition")}
+          >
+            <Layers3 size={16} />
+            Descomposición
+          </button>
+        </nav>
+
         <section className="kpis">
           <Metric
             label="Valor total"
@@ -180,135 +210,188 @@ export default function Home() {
             trend={view?.dayChange ?? 0}
           />
           <Metric
-            label={`Vs ${portfolioConfig?.benchmark ?? "SPY"}`}
-            value={percent((view?.performance.at(-1)?.portfolio ?? 0) - (view?.performance.at(-1)?.benchmark ?? 0))}
+            label="Vs benchmark ponderado"
+            value={percent((performanceData.at(-1)?.portfolio ?? 0) - (performanceData.at(-1)?.benchmark ?? 0))}
             detail="Diferencial del rango"
-            trend={(view?.performance.at(-1)?.portfolio ?? 0) - (view?.performance.at(-1)?.benchmark ?? 0)}
+            trend={(performanceData.at(-1)?.portfolio ?? 0) - (performanceData.at(-1)?.benchmark ?? 0)}
           />
         </section>
 
-        <section className="grid">
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Evolución</h2>
-              <span className="status">
-                <LineChart size={14} /> Portfolio vs benchmark
-              </span>
-            </div>
-            <div className="chart">
-              <ResponsiveContainer>
-                <ReLineChart data={view?.performance ?? []}>
-                  <CartesianGrid stroke="#e5ebe4" vertical={false} />
-                  <XAxis dataKey="date" tickLine={false} minTickGap={32} />
-                  <YAxis tickFormatter={(value) => `${value}%`} width={48} />
-                  <Tooltip formatter={(value: number) => percent(value)} />
-                  <Line type="monotone" dataKey="portfolio" stroke="#0f8b5f" strokeWidth={2.4} dot={false} />
-                  <Line type="monotone" dataKey="benchmark" stroke="#2364aa" strokeWidth={2} dot={false} />
-                </ReLineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Composición</h2>
-              <BarChart3 size={18} color="#2364aa" />
-            </div>
-            <div className="bars">
-              {view?.allocation.map((item) => (
-                <div className="bar-row" key={item.symbol}>
-                  <strong>{item.symbol}</strong>
-                  <div className="bar">
-                    <span style={{ width: `${Math.min(item.weight, 100)}%` }} />
-                  </div>
-                  <span>{percent(item.weight, 1)}</span>
+        {activeTab === "performance" ? (
+          <>
+            <section className="grid">
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Evolución</h2>
+                  <span className="status">
+                    <LineChart size={14} /> Portfolio vs benchmark ponderado
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Acciones y ETFs</h2>
-            <span className="status">
-              <Activity size={14} /> Precios de mercado
-            </span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Símbolo</th>
-                  <th>Cantidad</th>
-                  <th>Precio</th>
-                  <th>Valor</th>
-                  <th>Peso</th>
-                  <th>Diario</th>
-                  <th>P&L</th>
-                  <th>P&L %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view?.positions.map((position) => (
-                  <tr key={position.symbol}>
-                    <td>{position.symbol}</td>
-                    <td>{number(position.quantity)}</td>
-                    <td>{money(position.price)}</td>
-                    <td>{money(position.value)}</td>
-                    <td>{percent(position.weight, 1)}</td>
-                    <td className={classFor(position.dayChange)}>{money(position.dayChange)}</td>
-                    <td className={classFor(position.pnl ?? 0)}>
-                      {position.pnl === null ? "n/a" : money(position.pnl)}
-                    </td>
-                    <td className={classFor(position.pnlPercent ?? 0)}>
-                      {position.pnlPercent === null ? "n/a" : percent(position.pnlPercent)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="grid">
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Comparables</h2>
-              <span className="status">Portafolios similares</span>
-            </div>
-            <div className="compare-list">
-              {comparisons.map((item) => (
-                <div className="compare-row" key={item.name}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>{item.symbols}</span>
-                  </div>
-                  <strong className={classFor(item.returnPercent)}>{percent(item.returnPercent)}</strong>
-                  <span>{percent(item.correlation * 100, 0)} corr.</span>
+                <div className="chart">
+                  <ResponsiveContainer>
+                    <ReLineChart data={performanceData}>
+                      <CartesianGrid stroke="#e5ebe4" vertical={false} />
+                      <XAxis dataKey="date" tickLine={false} minTickGap={32} />
+                      <YAxis tickFormatter={(value) => `${value}%`} width={48} />
+                      <Tooltip formatter={(value: number) => percent(value)} />
+                      <Line type="monotone" dataKey="portfolio" stroke="#0f8b5f" strokeWidth={2.4} dot={false} />
+                      <Line type="monotone" dataKey="benchmark" stroke="#2364aa" strokeWidth={2} dot={false} />
+                    </ReLineChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Rendimiento diario</h2>
-              <Clock3 size={18} color="#b47b24" />
-            </div>
-            <div className="chart">
-              <ResponsiveContainer>
-                <AreaChart data={view?.performance ?? []}>
-                  <CartesianGrid stroke="#e5ebe4" vertical={false} />
-                  <XAxis dataKey="date" hide />
-                  <YAxis hide />
-                  <Tooltip formatter={(value: number) => percent(value)} />
-                  <Area type="monotone" dataKey="portfolio" stroke="#b47b24" fill="#f1dfbe" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Composición</h2>
+                  <BarChart3 size={18} color="#2364aa" />
+                </div>
+                <div className="bars">
+                  {view?.allocation.map((item) => (
+                    <div className="bar-row" key={item.symbol}>
+                      <strong>{item.symbol}</strong>
+                      <div className="bar">
+                        <span style={{ width: `${Math.min(item.weight, 100)}%` }} />
+                      </div>
+                      <span>{percent(item.weight, 1)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid">
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Comparables</h2>
+                  <span className="status">Portafolios similares</span>
+                </div>
+                <div className="compare-list">
+                  {comparisons.map((item) => (
+                    <div className="compare-row" key={item.name}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <span>{item.symbols}</span>
+                      </div>
+                      <strong className={classFor(item.returnPercent)}>{percent(item.returnPercent)}</strong>
+                      <span>{percent(item.correlation * 100, 0)} corr.</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>Rendimiento diario</h2>
+                  <Clock3 size={18} color="#b47b24" />
+                </div>
+                <div className="chart">
+                  <ResponsiveContainer>
+                    <AreaChart data={performanceData}>
+                      <CartesianGrid stroke="#e5ebe4" vertical={false} />
+                      <XAxis dataKey="date" hide />
+                      <YAxis hide />
+                      <Tooltip formatter={(value: number) => percent(value)} />
+                      <Area type="monotone" dataKey="portfolio" stroke="#b47b24" fill="#f1dfbe" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : (
+          <>
+            <section className="panel">
+              <div className="panel-header">
+                <h2>Descomposición por categoría</h2>
+                <span className="status">
+                  <Layers3 size={14} /> Acciones, ETFs y fondos
+                </span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Categoría</th>
+                      <th># activos</th>
+                      <th>Valor compra</th>
+                      <th>Valor actual</th>
+                      <th>P&L diario</th>
+                      <th>P&L diario %</th>
+                      <th>P&L acum.</th>
+                      <th>P&L acum. %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view?.decomposition.map((row) => (
+                      <tr key={row.category}>
+                        <td>{row.category}</td>
+                        <td>{row.count}</td>
+                        <td>{row.cost === null ? "n/a" : money(row.cost)}</td>
+                        <td>{money(row.value)}</td>
+                        <td className={classFor(row.dayChange)}>{money(row.dayChange)}</td>
+                        <td className={classFor(row.dayChangePercent)}>{percent(row.dayChangePercent)}</td>
+                        <td className={classFor(row.pnl ?? 0)}>{row.pnl === null ? "n/a" : money(row.pnl)}</td>
+                        <td className={classFor(row.pnlPercent ?? 0)}>
+                          {row.pnlPercent === null ? "n/a" : percent(row.pnlPercent)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <h2>Detalle de activos</h2>
+                <span className="status">
+                  <Activity size={14} /> Precios de mercado
+                </span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Símbolo</th>
+                      <th>Categoría</th>
+                      <th>Cantidad</th>
+                      <th>Precio</th>
+                      <th>Valor compra</th>
+                      <th>Valor actual</th>
+                      <th>Peso</th>
+                      <th>P&L diario</th>
+                      <th>P&L diario %</th>
+                      <th>P&L acum.</th>
+                      <th>P&L acum. %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view?.positions.map((position) => (
+                      <tr key={position.symbol}>
+                        <td>{position.symbol}</td>
+                        <td>{position.category}</td>
+                        <td>{number(position.quantity)}</td>
+                        <td>{money(position.price)}</td>
+                        <td>{position.cost === null ? "n/a" : money(position.cost)}</td>
+                        <td>{money(position.value)}</td>
+                        <td>{percent(position.weight, 1)}</td>
+                        <td className={classFor(position.dayChange)}>{money(position.dayChange)}</td>
+                        <td className={classFor(position.dayChangePercent)}>{percent(position.dayChangePercent)}</td>
+                        <td className={classFor(position.pnl ?? 0)}>
+                          {position.pnl === null ? "n/a" : money(position.pnl)}
+                        </td>
+                        <td className={classFor(position.pnlPercent ?? 0)}>
+                          {position.pnlPercent === null ? "n/a" : percent(position.pnlPercent)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
       </section>
     </main>
   );

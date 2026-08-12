@@ -3,6 +3,10 @@ import type { Holding, MarketSeries, PricePoint, SimilarPortfolio } from "./type
 export type PositionView = {
   symbol: string;
   quantity: number;
+  assetType: string;
+  style: string;
+  category: string;
+  benchmark: string;
   price: number;
   value: number;
   cost: number | null;
@@ -10,6 +14,7 @@ export type PositionView = {
   pnlPercent: number | null;
   weight: number;
   dayChange: number;
+  dayChangePercent: number;
 };
 
 export type PortfolioView = {
@@ -21,6 +26,19 @@ export type PortfolioView = {
   positions: PositionView[];
   allocation: Array<{ symbol: string; value: number; weight: number }>;
   performance: Array<{ date: string; portfolio: number; benchmark?: number }>;
+  decomposition: CategoryView[];
+};
+
+export type CategoryView = {
+  category: string;
+  count: number;
+  cost: number | null;
+  value: number;
+  dayChange: number;
+  dayChangePercent: number;
+  pnl: number | null;
+  pnlPercent: number | null;
+  positions: PositionView[];
 };
 
 export function buildPortfolioView(
@@ -37,13 +55,18 @@ export function buildPortfolioView(
     return {
       symbol: holding.symbol,
       quantity: holding.quantity,
+      assetType: holding.assetType ?? inferAssetType(holding.symbol),
+      style: holding.style ?? inferStyle(holding.symbol),
+      category: categoryFor(holding),
+      benchmark: holding.benchmark ?? benchmarkFor(holding),
       price,
       value,
       cost,
       pnl: cost === null ? null : value - cost,
       pnlPercent: cost === null || cost === 0 ? null : (value / cost - 1) * 100,
       weight: 0,
-      dayChange: value * ((series?.changePercent ?? 0) / 100)
+      dayChange: value * ((series?.changePercent ?? 0) / 100),
+      dayChangePercent: series?.changePercent ?? 0
     };
   });
   const totalValue = rawPositions.reduce((sum, item) => sum + item.value, 0);
@@ -61,8 +84,27 @@ export function buildPortfolioView(
     dayChange: positions.reduce((sum, item) => sum + item.dayChange, 0),
     positions,
     allocation: positions.map(({ symbol, value, weight }) => ({ symbol, value, weight })),
-    performance: buildPerformance(holdings, market, benchmark)
+    performance: buildPerformance(holdings, market, benchmark),
+    decomposition: buildDecomposition(positions)
   };
+}
+
+export function buildCompositeBenchmark(holdings: Holding[], market: MarketSeries[]) {
+  const bySymbol = new Map(market.map((item) => [item.symbol, item]));
+  const weightedBenchmarks = holdings.map((holding) => ({
+    symbol: holding.benchmark ?? benchmarkFor(holding),
+    weight: holding.quantity * (bySymbol.get(holding.symbol)?.price ?? 0)
+  }));
+  const total = weightedBenchmarks.reduce((sum, item) => sum + item.weight, 0);
+  const byBenchmark = new Map<string, number>();
+  for (const item of weightedBenchmarks) {
+    byBenchmark.set(item.symbol, (byBenchmark.get(item.symbol) ?? 0) + item.weight);
+  }
+  const benchmarkHoldings = Array.from(byBenchmark.entries()).map(([symbol, value]) => ({
+    symbol,
+    quantity: total ? value / total : 0
+  }));
+  return buildPerformance(benchmarkHoldings, market);
 }
 
 export function buildSimilarPerformance(portfolio: SimilarPortfolio, market: MarketSeries[]) {
@@ -114,6 +156,72 @@ function buildPerformance(holdings: Holding[], market: MarketSeries[], benchmark
       benchmark: benchmarkPoint ? (benchmarkPoint.close / benchmarkBase - 1) * 100 : undefined
     };
   });
+}
+
+function buildDecomposition(positions: PositionView[]): CategoryView[] {
+  const groups = new Map<string, PositionView[]>();
+  for (const position of positions) {
+    const list = groups.get(position.category) ?? [];
+    list.push(position);
+    groups.set(position.category, list);
+  }
+  return Array.from(groups.entries())
+    .map(([category, items]) => {
+      const value = items.reduce((sum, item) => sum + item.value, 0);
+      const costValues = items.map((item) => item.cost).filter((item): item is number => item !== null);
+      const cost = costValues.length === items.length ? costValues.reduce((sum, item) => sum + item, 0) : null;
+      const dayChange = items.reduce((sum, item) => sum + item.dayChange, 0);
+      return {
+        category,
+        count: items.length,
+        cost,
+        value,
+        dayChange,
+        dayChangePercent: value ? (dayChange / value) * 100 : 0,
+        pnl: cost === null ? null : value - cost,
+        pnlPercent: cost === null || cost === 0 ? null : (value / cost - 1) * 100,
+        positions: items
+      };
+    })
+    .sort((left, right) => right.value - left.value);
+}
+
+function categoryFor(holding: Holding) {
+  const assetType = holding.assetType ?? inferAssetType(holding.symbol);
+  if (assetType === "stock") return `Stocks - ${holding.style ?? inferStyle(holding.symbol)}`;
+  if (assetType === "etf") return "ETFs";
+  if (assetType === "mutual_fund") return "Mutual funds";
+  return title(assetType);
+}
+
+function inferAssetType(symbol: string) {
+  if (new Set(["EEM", "EFA", "QUAL", "SPY", "QQQ", "MOAT", "VTI", "VUG", "SCHG"]).has(symbol)) {
+    return "etf";
+  }
+  return "stock";
+}
+
+function inferStyle(symbol: string) {
+  if (new Set(["MELI", "NVDA", "GLOB", "EXE"]).has(symbol)) return "growth";
+  if (new Set(["AFL", "FE", "WTW"]).has(symbol)) return "dividend";
+  if (new Set(["EEM", "EFA"]).has(symbol)) return "foreign";
+  if (new Set(["CTSH", "INCY", "PYPL", "REGN", "ERIE"]).has(symbol)) return "value";
+  return "blend";
+}
+
+function benchmarkFor(holding: Holding) {
+  const assetType = holding.assetType ?? inferAssetType(holding.symbol);
+  const style = holding.style ?? inferStyle(holding.symbol);
+  if (assetType === "etf" && holding.symbol === "EEM") return "EEM";
+  if (assetType === "etf" && holding.symbol === "EFA") return "EFA";
+  if (style === "foreign") return "EFA";
+  if (style === "growth") return "QQQ";
+  if (style === "value" || style === "dividend") return "QUAL";
+  return "SPY";
+}
+
+function title(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function commonDates(series: PricePoint[][]) {

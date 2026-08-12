@@ -16,6 +16,13 @@ type SnapTradeAccount = {
 type SnapTradePosition = {
   cash_equivalent?: boolean;
   units?: number | string;
+  price?: number | string;
+  average_purchase_price?: number | string;
+  averagePurchasePrice?: number | string;
+  cost_basis?: number | string;
+  costBasis?: number | string;
+  book_value?: number | string;
+  bookValue?: number | string;
   currency?: string | { code?: string };
   instrument?: {
     kind?: string;
@@ -49,7 +56,7 @@ export async function GET() {
 
 async function readSnapTradeHoldings(clientId: string, consumerKey: string) {
   const accounts = (await snapTradeGet("/accounts", clientId, consumerKey)) as SnapTradeAccount[];
-  const quantities = new Map<string, number>();
+  const holdings = new Map<string, Holding>();
   const baseCurrency = process.env.PORTFOLIO_BASE_CURRENCY ?? "USD";
 
   for (const account of accounts) {
@@ -76,14 +83,22 @@ async function readSnapTradeHoldings(clientId: string, consumerKey: string) {
       if (positionCurrency && positionCurrency !== baseCurrency.toUpperCase()) continue;
       const units = Number(position.units ?? 0);
       if (Number.isFinite(units) && units > 0) {
-        quantities.set(symbol, (quantities.get(symbol) ?? 0) + units);
+        const existing = holdings.get(symbol);
+        const costBasis = readCostBasis(position, units);
+        const quantity = (existing?.quantity ?? 0) + units;
+        holdings.set(symbol, {
+          symbol,
+          quantity,
+          costBasis: weightedAverage(existing?.costBasis, existing?.quantity ?? 0, costBasis, units),
+          assetType: assetTypeFor(kind),
+          style: styleFor(symbol, kind),
+          benchmark: benchmarkFor(symbol, kind)
+        });
       }
     }
   }
 
-  return Array.from(quantities.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([symbol, quantity]) => ({ symbol, quantity }));
+  return Array.from(holdings.values()).sort((left, right) => left.symbol.localeCompare(right.symbol));
 }
 
 async function snapTradeGet(resource: string, clientId: string, consumerKey: string) {
@@ -141,4 +156,66 @@ function defaultSimilarPortfolios(): Array<{ name: string; holdings: Holding[] }
       ]
     }
   ];
+}
+
+function readCostBasis(position: SnapTradePosition, units: number) {
+  const perShare = firstNumber(
+    position.average_purchase_price,
+    position.averagePurchasePrice,
+    position.costBasis,
+    position.cost_basis
+  );
+  if (perShare !== null) return perShare;
+  const totalCost = firstNumber(position.book_value, position.bookValue);
+  if (totalCost !== null && units > 0) return totalCost / units;
+  return undefined;
+}
+
+function firstNumber(...values: Array<number | string | undefined>) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function weightedAverage(
+  existingCost: number | undefined,
+  existingQuantity: number,
+  nextCost: number | undefined,
+  nextQuantity: number
+) {
+  if (existingCost === undefined) return nextCost;
+  if (nextCost === undefined) return existingCost;
+  const totalQuantity = existingQuantity + nextQuantity;
+  return totalQuantity ? (existingCost * existingQuantity + nextCost * nextQuantity) / totalQuantity : undefined;
+}
+
+function assetTypeFor(kind: string): Holding["assetType"] {
+  if (kind === "etf" || kind === "cef") return "etf";
+  if (kind === "mutualfund") return "mutual_fund";
+  if (kind === "crypto") return "crypto";
+  if (kind === "stock" || kind === "adr") return "stock";
+  return "other";
+}
+
+function styleFor(symbol: string, kind: string): Holding["style"] {
+  if (kind !== "stock" && kind !== "adr") {
+    if (symbol === "EEM" || symbol === "EFA") return "foreign";
+    return "blend";
+  }
+  if (new Set(["MELI", "NVDA", "GLOB", "EXE"]).has(symbol)) return "growth";
+  if (new Set(["AFL", "FE", "WTW"]).has(symbol)) return "dividend";
+  if (new Set(["CTSH", "INCY", "PYPL", "REGN", "ERIE"]).has(symbol)) return "value";
+  return "blend";
+}
+
+function benchmarkFor(symbol: string, kind: string) {
+  const style = styleFor(symbol, kind);
+  if (symbol === "EEM") return "EEM";
+  if (symbol === "EFA") return "EFA";
+  if (style === "foreign") return "EFA";
+  if (style === "growth") return "QQQ";
+  if (style === "value" || style === "dividend") return "QUAL";
+  return "SPY";
 }

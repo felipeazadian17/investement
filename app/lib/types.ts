@@ -2,6 +2,9 @@ export type Holding = {
   symbol: string;
   quantity: number;
   costBasis?: number;
+  assetType?: "stock" | "etf" | "mutual_fund" | "crypto" | "other";
+  style?: "value" | "growth" | "dividend" | "foreign" | "blend";
+  benchmark?: string;
 };
 
 export type SimilarPortfolio = {
