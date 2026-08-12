@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+out/
+
+# Local research state and generated artifacts
+.cache/
+artifacts/
+audit/
+memory/
+output/
+resultados/
+
+# Personal financial profiles stay local; only schemas and examples are versioned.
+profiles/*.local.json
+
+# Broker credentials and OAuth material must never enter the repository.
+*schwab*token*.json
+*oauth*token*.json
+
+# Local portfolio snapshots can reveal personal holdings. Vercel should use
+# SnapTrade environment variables instead.
+portfolio.config.json

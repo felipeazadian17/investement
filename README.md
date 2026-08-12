@@ -2,7 +2,45 @@
 
 Investement es un sistema de agentes para asistir en la construccion, analisis y gestion de un portfolio de inversion personalizado.
 
-El objetivo es desarrollar un asesor de inversion que pueda recomendar compras, ventas, desinversiones y rebalanceos en base a analisis fundamental, analisis tecnico, gestion de riesgo y optimizacion de portfolio. En etapas posteriores, el sistema deberia integrarse con Charles Schwab para leer cuentas, consultar datos de mercado y eventualmente ejecutar trades de forma controlada.
+## Dashboard Web
+
+El repo incluye una primera app Next.js lista para alojar en Vercel. El dashboard
+muestra valor total, P&L, cambio diario, evolucion historica, pesos por posicion
+y comparacion contra el benchmark configurado y portafolios similares.
+
+En desarrollo local, si no hay variables de SnapTrade, la app puede leer un
+snapshot local en `portfolio.config.json`:
+
+- `holdings`: posiciones actuales, cantidad y costo base opcional.
+- `benchmark`: simbolo de referencia, por defecto `SPY`.
+- `similarPortfolios`: blends comparables para medir rendimiento y correlacion.
+
+Para correrla localmente en una maquina con Node.js:
+
+```bash
+npm install
+npm run dev
+```
+
+Para desplegarla, importar el repositorio en Vercel. Vercel detecta Next.js con
+[`vercel.json`](vercel.json) y ejecuta el build automaticamente. La API
+`/api/market` consulta Yahoo Chart desde serverless functions y cachea por un
+minuto. La API `/api/portfolio` lee SnapTrade Personal en modo read-only cuando
+existen estas variables de entorno:
+
+- `SNAPTRADE_CLIENT_ID`
+- `SNAPTRADE_CONSUMER_KEY`
+- `PORTFOLIO_BASE_CURRENCY`, por defecto `USD`
+- `PORTFOLIO_BENCHMARK`, por defecto `SPY`
+
+`portfolio.config.json` queda ignorado por Git porque puede revelar posiciones
+personales. Para regenerar un snapshot local desde SnapTrade:
+
+```bash
+.venv/bin/python scripts/export_snaptrade_dashboard_config.py
+```
+
+El objetivo es desarrollar un asesor de inversion que pueda recomendar compras, ventas, desinversiones y rebalanceos en base a analisis fundamental, analisis tecnico, gestion de riesgo y optimizacion de portfolio. El portfolio del broker se consulta exclusivamente mediante SnapTrade Personal en modo read-only.
 
 > Nota: este proyecto no debe comenzar como un agente que opera automaticamente. La primera version debe funcionar en modo analisis, recomendacion, simulacion y auditoria. La ejecucion real requiere controles adicionales, permisos explicitos y validacion operativa.
 
