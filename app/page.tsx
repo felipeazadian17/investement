@@ -5,12 +5,17 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BriefcaseBusiness,
+  CalendarDays,
   ChartPie,
+  ChevronDown,
   CircleDollarSign,
   Clock3,
+  ExternalLink,
+  Globe2,
   Info,
   Layers3,
   LineChart,
+  Newspaper,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -40,9 +45,10 @@ import {
   buildSimilarPerformance,
   correlation,
   dailyReturns,
+  type CategoryView,
   type PositionView
 } from "./lib/portfolio";
-import type { MarketResponse, PortfolioConfig } from "./lib/types";
+import type { MarketResponse, NewsKind, NewsResponse, PortfolioConfig } from "./lib/types";
 
 const ranges = [
   { value: "1mo", label: "1M" },
@@ -55,7 +61,7 @@ const ranges = [
 
 const allocationColors = ["#136f63", "#2f6fbb", "#d29b2d", "#7d5ba6", "#cf6356", "#698474"];
 
-type Tab = "overview" | "performance" | "positions";
+type Tab = "overview" | "performance" | "positions" | "news";
 type Sort = "value" | "day" | "return" | "symbol";
 
 export default function Home() {
@@ -63,6 +69,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [portfolioConfig, setPortfolioConfig] = useState<PortfolioConfig | null>(null);
   const [market, setMarket] = useState<MarketResponse | null>(null);
+  const [news, setNews] = useState<NewsResponse | null>(null);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -129,6 +138,20 @@ export default function Home() {
     }
   }
 
+  async function loadNews() {
+    setNewsLoading(true);
+    setNewsError(null);
+    try {
+      const response = await fetch("/api/news");
+      if (!response.ok) throw new Error("No se pudieron cargar las noticias.");
+      setNews((await response.json()) as NewsResponse);
+    } catch (caught) {
+      setNewsError(caught instanceof Error ? caught.message : "Error inesperado.");
+    } finally {
+      setNewsLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -158,6 +181,12 @@ export default function Home() {
     // The symbol list is the stable trigger for a fresh market snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, symbols.join(",")]);
+
+  useEffect(() => {
+    if (activeTab === "news" && portfolioConfig && !news && !newsLoading) loadNews();
+    // News is fetched lazily when its view is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, portfolioConfig, news]);
 
   const benchmark = market?.series.find((item) => item.symbol === portfolioConfig?.benchmark);
   const view =
@@ -287,6 +316,9 @@ export default function Home() {
           <TabButton active={activeTab === "positions"} onClick={() => setActiveTab("positions")}>
             <Layers3 size={16} /> Posiciones
           </TabButton>
+          <TabButton active={activeTab === "news"} onClick={() => setActiveTab("news")}>
+            <Newspaper size={16} /> Noticias
+          </TabButton>
         </nav>
 
         {error ? <div className="error-banner">{error}</div> : null}
@@ -359,6 +391,10 @@ export default function Home() {
                 onCategoryChange={setCategory}
                 onSortChange={setSort}
               />
+            ) : null}
+
+            {activeTab === "news" ? (
+              <NewsView news={news} loading={newsLoading} error={newsError} onRetry={loadNews} />
             ) : null}
           </>
         ) : null}
@@ -627,17 +663,7 @@ function PositionsView({
   onSortChange
 }: {
   positions: PositionView[];
-  decomposition: Array<{
-    category: string;
-    count: number;
-    units: number;
-    cost: number | null;
-    value: number;
-    dayChange: number;
-    dayChangePercent: number;
-    pnl: number | null;
-    pnlPercent: number | null;
-  }>;
+  decomposition: CategoryView[];
   categories: string[];
   query: string;
   category: string;
@@ -646,6 +672,19 @@ function PositionsView({
   onCategoryChange: (value: string) => void;
   onSortChange: (value: Sort) => void;
 }) {
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(decomposition[0] ? [decomposition[0].category] : [])
+  );
+
+  function toggleGroup(group: string) {
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
   return (
     <div className="view-stack">
       <section className="panel category-panel">
@@ -666,21 +705,52 @@ function PositionsView({
               </tr>
             </thead>
             <tbody>
-              {decomposition.map((row) => (
-                <tr key={row.category}>
-                  <td><strong>{row.category}</strong></td>
-                  <td>{row.count}</td>
-                  <td>{formatNumber(row.units)}</td>
-                  <td>{row.cost === null ? "-" : money(row.cost)}</td>
-                  <td><strong>{money(row.value)}</strong></td>
-                  <td className={classFor(row.dayChange)}>{signedMoney(row.dayChange)}</td>
-                  <td className={classFor(row.dayChangePercent)}>{signedPercent(row.dayChangePercent)}</td>
-                  <td className={classFor(row.pnl ?? 0)}>{row.pnl === null ? "-" : signedMoney(row.pnl)}</td>
-                  <td className={classFor(row.pnlPercent ?? 0)}>
-                    {row.pnlPercent === null ? "-" : signedPercent(row.pnlPercent)}
-                  </td>
-                </tr>
-              ))}
+              {decomposition.map((row) => {
+                const open = openGroups.has(row.category);
+                return [
+                  <tr className="category-group-row" key={row.category}>
+                    <td>
+                      <button
+                        type="button"
+                        className={`group-toggle ${open ? "open" : ""}`}
+                        onClick={() => toggleGroup(row.category)}
+                        aria-expanded={open}
+                      >
+                        <ChevronDown size={15} />
+                        <strong>{row.category}</strong>
+                      </button>
+                    </td>
+                    <td>{row.count}</td>
+                    <td>{formatNumber(row.units)}</td>
+                    <td>{row.cost === null ? "-" : money(row.cost)}</td>
+                    <td><strong>{money(row.value)}</strong></td>
+                    <td className={classFor(row.dayChange)}>{signedMoney(row.dayChange)}</td>
+                    <td className={classFor(row.dayChangePercent)}>{signedPercent(row.dayChangePercent)}</td>
+                    <td className={classFor(row.pnl ?? 0)}>{row.pnl === null ? "-" : signedMoney(row.pnl)}</td>
+                    <td className={classFor(row.pnlPercent ?? 0)}>
+                      {row.pnlPercent === null ? "-" : signedPercent(row.pnlPercent)}
+                    </td>
+                  </tr>,
+                  ...(open ? row.positions.map((position) => (
+                    <tr className="category-position-row" key={`${row.category}-${position.symbol}`}>
+                      <td>
+                        <div className="instrument-cell grouped-instrument">
+                          <SymbolMark symbol={position.symbol} small />
+                          <div><strong>{position.symbol}</strong><span>{position.name}</span></div>
+                        </div>
+                      </td>
+                      <td>1</td>
+                      <td>{formatNumber(position.quantity)}</td>
+                      <td>{position.cost === null ? "-" : money(position.cost)}</td>
+                      <td><strong>{money(position.value)}</strong></td>
+                      <td className={classFor(position.dayChange)}>{signedMoney(position.dayChange)}</td>
+                      <td className={classFor(position.dayChangePercent)}>{signedPercent(position.dayChangePercent)}</td>
+                      <td className={classFor(position.pnl ?? 0)}>{position.pnl === null ? "-" : signedMoney(position.pnl)}</td>
+                      <td className={classFor(position.pnlPercent ?? 0)}>{position.pnlPercent === null ? "-" : signedPercent(position.pnlPercent)}</td>
+                    </tr>
+                  )) : [])
+                ];
+              })}
             </tbody>
           </table>
         </div>
@@ -792,6 +862,123 @@ function PositionsView({
       </section>
     </div>
   );
+}
+
+function NewsView({
+  news,
+  loading,
+  error,
+  onRetry
+}: {
+  news: NewsResponse | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (loading && !news) {
+    return (
+      <div className="news-loading">
+        <RefreshCw size={20} className="spinning" />
+        <strong>Actualizando noticias y calendario</strong>
+        <span>Consultando las posiciones y el contexto de mercado</span>
+      </div>
+    );
+  }
+
+  if (error && !news) {
+    return (
+      <div className="news-error">
+        <strong>{error}</strong>
+        <button type="button" onClick={onRetry}><RefreshCw size={14} /> Reintentar</button>
+      </div>
+    );
+  }
+
+  if (!news) return null;
+
+  return (
+    <div className="view-stack news-view">
+      <section className="panel news-agenda-panel">
+        <PanelHeader
+          title="Próximos eventos"
+          subtitle="Earnings y fechas ex-dividendo de tus posiciones"
+          control={<span className="as-of-label"><CalendarDays size={14} /> Próximos 9 días</span>}
+        />
+        {news.upcoming.length ? (
+          <div className="event-strip">
+            {news.upcoming.map((event) => (
+              <a href={event.url} target="_blank" rel="noreferrer" className="event-item" key={event.id}>
+                <span className={`event-icon ${event.type}`}>
+                  {event.type === "earnings" ? "E" : "D"}
+                </span>
+                <div>
+                  <strong>{event.title}</strong>
+                  <span>{longNewsDate(event.date)} · {event.detail}</span>
+                </div>
+                <ExternalLink size={14} />
+              </a>
+            ))}
+          </div>
+        ) : <EmptyNews message="No hay earnings ni fechas ex-dividendo confirmadas para los próximos días." />}
+      </section>
+
+      {news.warnings?.length ? <div className="warning-banner">{news.warnings.join(" ")}</div> : null}
+
+      <div className="news-grid">
+        <section className="panel portfolio-news-panel">
+          <PanelHeader title="Tus posiciones" subtitle="Información relevante del último mes" />
+          <div className="company-news-list">
+            {news.portfolio.map((group, index) => (
+              <details className="company-news-group" key={group.symbol} open={index === 0}>
+                <summary>
+                  <SymbolMark symbol={group.symbol} small />
+                  <strong>{group.symbol}</strong>
+                  <span>{group.articles.length ? `${group.articles.length} noticias` : "Sin novedades relevantes"}</span>
+                  <ChevronDown size={16} />
+                </summary>
+                <div className="company-article-list">
+                  {group.articles.length ? group.articles.map((article) => (
+                    <NewsArticleRow article={article} key={article.id} />
+                  )) : <EmptyNews message="No se encontraron novedades recientes para esta posición." compact />}
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel market-news-panel">
+          <PanelHeader
+            title="Mercados globales"
+            subtitle="Noticias financieras relevantes de la última semana"
+            control={<Globe2 size={17} className="panel-heading-icon" />}
+          />
+          <div className="market-article-list">
+            {news.market.length ? news.market.map((article) => (
+              <NewsArticleRow article={article} key={article.id} />
+            )) : <EmptyNews message="No se pudieron obtener noticias de mercado recientes." />}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function NewsArticleRow({ article }: { article: NewsResponse["market"][number] }) {
+  return (
+    <a className="news-article" href={article.url} target="_blank" rel="noreferrer">
+      <div className="news-article-meta">
+        <span className={`news-kind kind-${article.kind}`}>{newsKindLabel(article.kind)}</span>
+        <span>{article.source}</span>
+        <span>{relativeNewsDate(article.publishedAt)}</span>
+      </div>
+      <strong>{article.title}</strong>
+      <ExternalLink size={14} />
+    </a>
+  );
+}
+
+function EmptyNews({ message, compact = false }: { message: string; compact?: boolean }) {
+  return <div className={`empty-news ${compact ? "compact" : ""}`}>{message}</div>;
 }
 
 function PerformanceChart({
@@ -1043,6 +1230,34 @@ function shortDate(value: string) {
 
 function longDate(value: string) {
   return new Intl.DateTimeFormat("es-UY", { year: "numeric", month: "short", day: "numeric" }).format(new Date(`${value}T12:00:00`));
+}
+
+function longNewsDate(value: string) {
+  return new Intl.DateTimeFormat("es-UY", { weekday: "short", month: "short", day: "numeric" })
+    .format(new Date(`${value}T12:00:00`));
+}
+
+function relativeNewsDate(value: string) {
+  const days = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 86_400_000));
+  if (days === 0) return "Hoy";
+  if (days === 1) return "Ayer";
+  return `Hace ${days} días`;
+}
+
+function newsKindLabel(kind: NewsKind) {
+  const labels: Record<NewsKind, string> = {
+    earnings: "Resultados",
+    dividend: "Dividendos",
+    guidance: "Perspectivas",
+    analyst: "Analistas",
+    deal: "Operaciones",
+    regulation: "Regulación",
+    macro: "Macroeconomía",
+    geopolitics: "Geopolítica",
+    markets: "Mercados",
+    company: "Compañía"
+  };
+  return labels[kind];
 }
 
 function rangeLabel(value: string) {

@@ -5,9 +5,14 @@ Investement es un sistema de agentes para asistir en la construccion, analisis y
 ## Dashboard Web
 
 El repo incluye una app Next.js lista para alojar en Vercel. El dashboard separa
-Resumen, Rendimiento y Posiciones, e incluye valor total con efectivo, P&L,
-atribucion diaria, asignacion por estrategia, concentracion, riesgo, tablas
-filtrables y comparacion contra un benchmark ponderado por exposicion.
+Resumen, Rendimiento, Posiciones y Noticias, e incluye valor total con efectivo,
+P&L, atribucion diaria, asignacion por estrategia, concentracion, riesgo, tablas
+filtrables y comparacion contra un benchmark ponderado por exposicion. La
+descomposicion agrupa las posiciones en categorias desplegables.
+
+Noticias combina cobertura reciente de Google News RSS con el calendario de
+earnings y dividendos de Nasdaq. La vista muestra el ultimo mes por posicion,
+el contexto global de la ultima semana y los proximos eventos de la cartera.
 
 Los saldos y posiciones actuales provienen de SnapTrade. La serie historica
 reconstruye el comportamiento de la composicion actual; no representa el
@@ -38,6 +43,27 @@ existen estas variables de entorno:
 - `SNAPTRADE_CONSUMER_KEY`
 - `PORTFOLIO_BASE_CURRENCY`, por defecto `USD`
 - `PORTFOLIO_BENCHMARK`, por defecto `SPY`
+
+### Informe semanal
+
+Vercel ejecuta `/api/cron/weekly-report` los domingos a las 15:00 UTC, que
+corresponde a las 12:00 en Montevideo. El correo incluye resumen de rendimiento,
+compras y ventas leidas de SnapTrade y eventos relevantes de la proxima semana.
+
+Configurar estas variables solo en Vercel:
+
+- `CRON_SECRET`: secreto largo y aleatorio para proteger la ruta del cron.
+- `SMTP_HOST` y `SMTP_PORT`: servidor SMTP, por ejemplo
+  `smtp-mail.outlook.com` y `587`.
+- `SMTP_SECURE`: `false` para STARTTLS en puerto 587; `true` para puerto 465.
+- `SMTP_USERNAME` y `SMTP_PASSWORD`: credenciales SMTP o app password.
+- `SMTP_FROM`: remitente autorizado, normalmente igual a `SMTP_USERNAME`.
+- `WEEKLY_REPORT_TO`: uno o mas destinatarios separados por coma.
+- `WEEKLY_REPORT_TIMEZONE`: `America/Montevideo` por defecto.
+
+Vercel envia `CRON_SECRET` como `Authorization: Bearer ...`. En el plan Hobby,
+la ejecucion puede ocurrir dentro de la hora programada; los planes con cron de
+precision por minuto lo envian a las 12:00.
 
 `portfolio.config.json` queda ignorado por Git porque puede revelar posiciones
 personales. Para regenerar un snapshot local desde SnapTrade:
