@@ -1,5 +1,6 @@
 export type Holding = {
   symbol: string;
+  name?: string;
   quantity: number;
   costBasis?: number;
   assetType?: "stock" | "etf" | "mutual_fund" | "crypto" | "other";
@@ -15,6 +16,14 @@ export type SimilarPortfolio = {
 export type PortfolioConfig = {
   baseCurrency: string;
   benchmark: string;
+  cash?: number;
+  account?: {
+    name: string;
+    institution: string;
+    count: number;
+  };
+  source?: "snaptrade" | "local";
+  brokerAsOf?: string;
   holdings: Holding[];
   similarPortfolios: SimilarPortfolio[];
 };

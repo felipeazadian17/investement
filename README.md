@@ -4,14 +4,20 @@ Investement es un sistema de agentes para asistir en la construccion, analisis y
 
 ## Dashboard Web
 
-El repo incluye una primera app Next.js lista para alojar en Vercel. El dashboard
-muestra valor total, P&L, cambio diario, evolucion historica, pesos por posicion
-y comparacion contra el benchmark configurado y portafolios similares.
+El repo incluye una app Next.js lista para alojar en Vercel. El dashboard separa
+Resumen, Rendimiento y Posiciones, e incluye valor total con efectivo, P&L,
+atribucion diaria, asignacion por estrategia, concentracion, riesgo, tablas
+filtrables y comparacion contra un benchmark ponderado por exposicion.
+
+Los saldos y posiciones actuales provienen de SnapTrade. La serie historica
+reconstruye el comportamiento de la composicion actual; no representa el
+historial oficial de flujos y saldos del broker.
 
 En desarrollo local, si no hay variables de SnapTrade, la app puede leer un
 snapshot local en `portfolio.config.json`:
 
 - `holdings`: posiciones actuales, cantidad y costo base opcional.
+- `cash`: efectivo disponible en la moneda base.
 - `benchmark`: simbolo de referencia, por defecto `SPY`.
 - `similarPortfolios`: blends comparables para medir rendimiento y correlacion.
 

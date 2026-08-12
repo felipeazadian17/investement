@@ -89,7 +89,10 @@ async function fetchYahooSeries(symbol: string, range: string) {
     .filter((point): point is { date: string; close: number } => typeof point.close === "number");
 
   const price = result.meta?.regularMarketPrice ?? history.at(-1)?.close ?? 0;
-  const previousClose = result.meta?.previousClose ?? result.meta?.chartPreviousClose ?? price;
+  // Yahoo's chartPreviousClose may be the first close of the selected chart range.
+  // The penultimate daily observation is the reliable comparison for today's move.
+  const previousClose =
+    history.at(-2)?.close ?? result.meta?.previousClose ?? result.meta?.chartPreviousClose ?? price;
   const changePercent = previousClose ? (price / previousClose - 1) * 100 : 0;
 
   return {

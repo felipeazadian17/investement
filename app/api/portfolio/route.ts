@@ -11,6 +11,8 @@ const supportedKinds = new Set(["adr", "cef", "crypto", "etf", "mutualfund", "st
 
 type SnapTradeAccount = {
   id?: string;
+  name?: string;
+  institution_name?: string;
 };
 
 type SnapTradePosition = {
@@ -27,8 +29,19 @@ type SnapTradePosition = {
   instrument?: {
     kind?: string;
     symbol?: string;
+    description?: string | null;
     currency?: string | { code?: string };
   };
+};
+
+type SnapTradeBalance = {
+  cash?: number | string | null;
+  currency?: string | { code?: string };
+};
+
+type PositionPayload = {
+  results?: SnapTradePosition[];
+  data_freshness?: { as_of?: string };
 };
 
 export async function GET() {
@@ -36,12 +49,13 @@ export async function GET() {
   const consumerKey = process.env.SNAPTRADE_CONSUMER_KEY?.trim();
 
   if (clientId && consumerKey) {
-    const holdings = await readSnapTradeHoldings(clientId, consumerKey);
+    const portfolio = await readSnapTradePortfolio(clientId, consumerKey);
     return NextResponse.json(
       {
         baseCurrency: process.env.PORTFOLIO_BASE_CURRENCY ?? "USD",
         benchmark: process.env.PORTFOLIO_BENCHMARK ?? "SPY",
-        holdings,
+        ...portfolio,
+        source: "snaptrade",
         similarPortfolios: defaultSimilarPortfolios()
       },
       { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=300" } }
@@ -49,28 +63,41 @@ export async function GET() {
   }
 
   const local = await readLocalConfig();
-  return NextResponse.json(local, {
+  return NextResponse.json({ ...local, source: "local" }, {
     headers: { "Cache-Control": "no-store" }
   });
 }
 
-async function readSnapTradeHoldings(clientId: string, consumerKey: string) {
+async function readSnapTradePortfolio(clientId: string, consumerKey: string) {
   const accounts = (await snapTradeGet("/accounts", clientId, consumerKey)) as SnapTradeAccount[];
   const holdings = new Map<string, Holding>();
   const baseCurrency = process.env.PORTFOLIO_BASE_CURRENCY ?? "USD";
+  let cash = 0;
+  let brokerAsOf: string | undefined;
 
   for (const account of accounts) {
     if (!account.id) continue;
-    const payload = await snapTradeGet(
-      `/accounts/${encodeURIComponent(account.id)}/positions/all`,
-      clientId,
-      consumerKey
-    );
+    const [payload, balancesPayload] = await Promise.all([
+      snapTradeGet(
+        `/accounts/${encodeURIComponent(account.id)}/positions/all`,
+        clientId,
+        consumerKey
+      ),
+      snapTradeGet(`/accounts/${encodeURIComponent(account.id)}/balances`, clientId, consumerKey)
+    ]);
+    const positionPayload = payload as PositionPayload;
     const positions = Array.isArray(payload)
       ? payload
-      : Array.isArray((payload as { results?: unknown }).results)
-        ? ((payload as { results: SnapTradePosition[] }).results)
+      : Array.isArray(positionPayload.results)
+        ? positionPayload.results
         : [];
+    brokerAsOf = newestTimestamp(brokerAsOf, positionPayload.data_freshness?.as_of);
+    const balances = Array.isArray(balancesPayload) ? (balancesPayload as SnapTradeBalance[]) : [];
+    for (const balance of balances) {
+      if (currency(balance.currency) !== baseCurrency.toUpperCase()) continue;
+      const amount = Number(balance.cash ?? 0);
+      if (Number.isFinite(amount)) cash += amount;
+    }
 
     for (const position of positions as SnapTradePosition[]) {
       if (position.cash_equivalent === true) continue;
@@ -88,6 +115,7 @@ async function readSnapTradeHoldings(clientId: string, consumerKey: string) {
         const quantity = (existing?.quantity ?? 0) + units;
         holdings.set(symbol, {
           symbol,
+          name: instrument.description?.trim() || existing?.name || symbol,
           quantity,
           costBasis: weightedAverage(existing?.costBasis, existing?.quantity ?? 0, costBasis, units),
           assetType: assetTypeFor(kind),
@@ -98,7 +126,20 @@ async function readSnapTradeHoldings(clientId: string, consumerKey: string) {
     }
   }
 
-  return Array.from(holdings.values()).sort((left, right) => left.symbol.localeCompare(right.symbol));
+  const accountNames = accounts.map((account) => account.name?.trim()).filter(Boolean) as string[];
+  const institutions = Array.from(
+    new Set(accounts.map((account) => account.institution_name?.trim()).filter(Boolean) as string[])
+  );
+  return {
+    holdings: Array.from(holdings.values()).sort((left, right) => left.symbol.localeCompare(right.symbol)),
+    cash,
+    brokerAsOf,
+    account: {
+      name: accountNames.length === 1 ? accountNames[0] : "Portafolio consolidado",
+      institution: institutions.join(" + ") || "Broker conectado",
+      count: accounts.filter((account) => account.id).length
+    }
+  };
 }
 
 async function snapTradeGet(resource: string, clientId: string, consumerKey: string) {
@@ -134,6 +175,12 @@ function currency(value: unknown) {
     return String(value.code ?? "").trim().toUpperCase();
   }
   return String(value ?? "").trim().toUpperCase();
+}
+
+function newestTimestamp(current?: string, next?: string) {
+  if (!next) return current;
+  if (!current) return next;
+  return new Date(next).getTime() > new Date(current).getTime() ? next : current;
 }
 
 function defaultSimilarPortfolios(): Array<{ name: string; holdings: Holding[] }> {
@@ -204,18 +251,16 @@ function styleFor(symbol: string, kind: string): Holding["style"] {
     if (symbol === "EEM" || symbol === "EFA") return "foreign";
     return "blend";
   }
-  if (new Set(["MELI", "NVDA", "GLOB", "EXE"]).has(symbol)) return "growth";
-  if (new Set(["AFL", "FE", "WTW"]).has(symbol)) return "dividend";
+  if (new Set(["MELI", "GLOB", "WTW"]).has(symbol)) return "foreign";
+  if (new Set(["NVDA", "EXE"]).has(symbol)) return "growth";
+  if (new Set(["AFL", "FE"]).has(symbol)) return "dividend";
   if (new Set(["CTSH", "INCY", "PYPL", "REGN", "ERIE"]).has(symbol)) return "value";
   return "blend";
 }
 
 function benchmarkFor(symbol: string, kind: string) {
-  const style = styleFor(symbol, kind);
-  if (symbol === "EEM") return "EEM";
-  if (symbol === "EFA") return "EFA";
-  if (style === "foreign") return "EFA";
-  if (style === "growth") return "QQQ";
-  if (style === "value" || style === "dividend") return "QUAL";
+  if (kind === "etf" || kind === "cef") return symbol;
+  if (symbol === "MELI" || symbol === "GLOB") return "EEM";
+  if (symbol === "WTW") return "EFA";
   return "SPY";
 }
