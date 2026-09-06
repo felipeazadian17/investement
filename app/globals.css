@@ -859,6 +859,40 @@ select:focus-visible {
   min-width: 920px;
 }
 
+.stops-panel {
+  padding: 20px;
+}
+
+.stops-table {
+  min-width: 980px;
+}
+
+.priority-pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 66px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.priority-pill.review {
+  background: #fdebe7;
+  color: #aa3f32;
+}
+
+.priority-pill.watch {
+  background: #fff3d9;
+  color: #946818;
+}
+
+.priority-pill.normal {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
 .category-table td:first-child {
   color: var(--ink);
 }
@@ -912,7 +946,7 @@ select:focus-visible {
 }
 
 .positions-table {
-  min-width: 1120px;
+  min-width: 1240px;
 }
 
 .positions-table th:first-child,
@@ -1516,6 +1550,7 @@ select:focus-visible {
   .allocation-panel,
   .health-panel,
   .compact-panel,
+  .stops-panel,
   .category-panel,
   .positions-panel,
   .news-agenda-panel,

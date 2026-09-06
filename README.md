@@ -8,7 +8,16 @@ El repo incluye una app Next.js lista para alojar en Vercel. El dashboard separa
 Resumen, Rendimiento, Posiciones y Noticias, e incluye valor total con efectivo,
 P&L, atribucion diaria, asignacion por estrategia, concentracion, riesgo, tablas
 filtrables y comparacion contra un benchmark ponderado por exposicion. La
-descomposicion agrupa las posiciones en categorias desplegables.
+descomposicion agrupa las posiciones en categorias desplegables. La vista de
+Posiciones tambien calcula stops sugeridos por instrumento para control de
+riesgo, sin enviar ordenes al broker.
+
+Los stops sugeridos son una referencia operativa, no ordenes automaticas. La
+regla combina volatilidad realizada de las ultimas ruedas con un rango por tipo
+de activo: ETFs usan buffers mas estrechos, acciones value/dividend quedan en
+un rango intermedio y acciones growth/foreign tienen mas espacio. Cuando una
+posicion acumula una ganancia amplia, el stop intenta proteger parte de esa
+ganancia sin poner el nivel por encima del precio actual.
 
 Noticias combina cobertura reciente de Google News RSS con el calendario de
 earnings y dividendos de Nasdaq. La vista muestra el ultimo mes por posicion,

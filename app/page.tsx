@@ -16,6 +16,7 @@ import {
   Layers3,
   LineChart,
   Newspaper,
+  Siren,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -675,6 +676,13 @@ function PositionsView({
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set(decomposition[0] ? [decomposition[0].category] : [])
   );
+  const stopRows = [...positions]
+    .sort((left, right) => {
+      const priorityOrder = { review: 0, watch: 1, normal: 2 };
+      const byPriority = priorityOrder[left.stopLoss.priority] - priorityOrder[right.stopLoss.priority];
+      return byPriority || right.stopLoss.valueAtRisk - left.stopLoss.valueAtRisk;
+    })
+    .slice(0, 8);
 
   function toggleGroup(group: string) {
     setOpenGroups((current) => {
@@ -687,6 +695,49 @@ function PositionsView({
 
   return (
     <div className="view-stack">
+      <section className="panel stops-panel">
+        <PanelHeader
+          title="Stops sugeridos"
+          subtitle="Niveles calculados con volatilidad reciente y proteccion de ganancias"
+          control={<Siren size={17} className="panel-heading-icon" />}
+        />
+        <div className="table-scroll">
+          <table className="data-table stops-table">
+            <thead>
+              <tr>
+                <th>Instrumento</th>
+                <th>Precio actual</th>
+                <th>Stop sugerido</th>
+                <th>Distancia</th>
+                <th>Riesgo nominal</th>
+                <th>Riesgo %</th>
+                <th>Regla</th>
+                <th>Prioridad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stopRows.map((position) => (
+                <tr key={`stop-${position.symbol}`}>
+                  <td>
+                    <div className="instrument-cell">
+                      <SymbolMark symbol={position.symbol} small />
+                      <div><strong>{position.symbol}</strong><span>{position.name}</span></div>
+                    </div>
+                  </td>
+                  <td>{money(position.price)}</td>
+                  <td><strong>{money(position.stopLoss.price)}</strong></td>
+                  <td>{percent(position.stopLoss.distancePercent, 1)}</td>
+                  <td className="negative">{signedMoney(-position.stopLoss.valueAtRisk)}</td>
+                  <td className="negative">{percent(position.stopLoss.valueAtRiskPercent, 1)}</td>
+                  <td>{position.stopLoss.rule}</td>
+                  <td><span className={`priority-pill ${position.stopLoss.priority}`}>{stopPriorityLabel(position.stopLoss.priority)}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="panel category-panel">
         <PanelHeader title="Descomposición" subtitle="Totales por categoría de activo" />
         <div className="table-scroll">
@@ -799,6 +850,7 @@ function PositionsView({
                 <th>Valor actual</th>
                 <th>Peso</th>
                 <th>Precio compra</th>
+                <th>Stop sugerido</th>
                 <th>P&amp;L diario</th>
                 <th>P&amp;L acum.</th>
               </tr>
@@ -821,6 +873,10 @@ function PositionsView({
                   <td><strong>{money(position.value)}</strong></td>
                   <td>{percent(position.weight, 1)}</td>
                   <td>{position.cost === null ? "-" : money(position.cost / position.quantity)}</td>
+                  <td>
+                    <strong>{money(position.stopLoss.price)}</strong>
+                    <span>{percent(position.stopLoss.distancePercent, 1)}</span>
+                  </td>
                   <td className={classFor(position.dayChange)}>
                     <strong>{signedMoney(position.dayChange)}</strong>
                     <span>{signedPercent(position.dayChangePercent)}</span>
@@ -853,6 +909,7 @@ function PositionsView({
               </div>
               <div className="position-card-stats">
                 <span>Precio<strong>{money(position.price)}</strong></span>
+                <span>Stop<strong>{money(position.stopLoss.price)}</strong></span>
                 <span>Hoy<strong className={classFor(position.dayChange)}>{signedMoney(position.dayChange)}</strong></span>
                 <span>Total<strong className={classFor(position.pnl ?? 0)}>{position.pnl === null ? "-" : signedMoney(position.pnl)}</strong></span>
               </div>
@@ -1258,6 +1315,15 @@ function newsKindLabel(kind: NewsKind) {
     company: "Compañía"
   };
   return labels[kind];
+}
+
+function stopPriorityLabel(priority: PositionView["stopLoss"]["priority"]) {
+  const labels = {
+    review: "Revisar",
+    watch: "Vigilar",
+    normal: "Normal"
+  };
+  return labels[priority];
 }
 
 function rangeLabel(value: string) {

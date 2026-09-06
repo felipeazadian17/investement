@@ -16,6 +16,7 @@ export type PositionView = {
   weight: number;
   dayChange: number;
   dayChangePercent: number;
+  stopLoss: StopLossView;
 };
 
 export type PortfolioView = {
@@ -32,6 +33,15 @@ export type PortfolioView = {
   allocation: Array<{ symbol: string; value: number; weight: number }>;
   performance: Array<{ date: string; portfolio: number; benchmark?: number }>;
   decomposition: CategoryView[];
+};
+
+export type StopLossView = {
+  price: number;
+  valueAtRisk: number;
+  valueAtRiskPercent: number;
+  distancePercent: number;
+  rule: string;
+  priority: "review" | "watch" | "normal";
 };
 
 export type CategoryView = {
@@ -59,6 +69,15 @@ export function buildPortfolioView(
     const price = series?.price ?? 0;
     const value = holding.quantity * price;
     const cost = holding.costBasis === undefined ? null : holding.quantity * holding.costBasis;
+    const costPerShare = holding.costBasis;
+    const stopLoss = buildStopLoss({
+      price,
+      quantity: holding.quantity,
+      costBasis: costPerShare,
+      assetType: holding.assetType ?? inferAssetType(holding.symbol),
+      style: holding.style ?? inferStyle(holding.symbol),
+      history: series?.history ?? []
+    });
     return {
       symbol: holding.symbol,
       name: holding.name ?? holding.symbol,
@@ -74,7 +93,8 @@ export function buildPortfolioView(
       pnlPercent: cost === null || cost === 0 ? null : (value / cost - 1) * 100,
       weight: 0,
       dayChange: holding.quantity * (price - (series?.previousClose ?? price)),
-      dayChangePercent: series?.changePercent ?? 0
+      dayChangePercent: series?.changePercent ?? 0,
+      stopLoss
     };
   });
   const investedValue = rawPositions.reduce((sum, item) => sum + item.value, 0);
@@ -257,6 +277,83 @@ function buildDecomposition(positions: PositionView[]): CategoryView[] {
       };
     })
     .sort((left, right) => right.value - left.value);
+}
+
+function buildStopLoss({
+  price,
+  quantity,
+  costBasis,
+  assetType,
+  style,
+  history
+}: {
+  price: number;
+  quantity: number;
+  costBasis?: number;
+  assetType: string;
+  style: string;
+  history: PricePoint[];
+}): StopLossView {
+  if (!price || quantity <= 0) {
+    return {
+      price: 0,
+      valueAtRisk: 0,
+      valueAtRiskPercent: 0,
+      distancePercent: 0,
+      rule: "Sin precio",
+      priority: "review"
+    };
+  }
+
+  const floor = stopFloor(assetType, style);
+  const ceiling = stopCeiling(assetType, style);
+  const dailyVolatility = realizedDailyVolatility(history.slice(-63));
+  const volatilityBuffer = dailyVolatility ? dailyVolatility * 2.8 * 100 : floor;
+  const buffer = clamp(volatilityBuffer, floor, ceiling);
+  const trailingStop = price * (1 - buffer / 100);
+  const protectedCost = costBasis && price / costBasis - 1 > 0.18 ? costBasis * 1.03 : 0;
+  const stopPrice = Math.min(price * 0.98, Math.max(trailingStop, protectedCost));
+  const valueAtRisk = Math.max(0, (price - stopPrice) * quantity);
+  const value = price * quantity;
+  const valueAtRiskPercent = value ? (valueAtRisk / value) * 100 : 0;
+  const distancePercent = price ? (price / stopPrice - 1) * 100 : 0;
+
+  return {
+    price: stopPrice,
+    valueAtRisk,
+    valueAtRiskPercent,
+    distancePercent,
+    rule: `${Math.round(buffer)}% trail`,
+    priority: distancePercent < 4 || valueAtRiskPercent > 18 ? "review" : distancePercent < 8 ? "watch" : "normal"
+  };
+}
+
+function realizedDailyVolatility(history: PricePoint[]) {
+  const returns = history.slice(1).flatMap((point, index) => {
+    const previous = history[index]?.close;
+    return previous ? [point.close / previous - 1] : [];
+  });
+  if (returns.length < 10) return 0;
+  const mean = average(returns);
+  const variance = returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance);
+}
+
+function stopFloor(assetType: string, style: string) {
+  if (assetType === "etf" || assetType === "mutual_fund") return 7;
+  if (style === "dividend" || style === "value") return 9;
+  if (style === "growth" || style === "foreign") return 12;
+  return 10;
+}
+
+function stopCeiling(assetType: string, style: string) {
+  if (assetType === "etf" || assetType === "mutual_fund") return 14;
+  if (style === "growth" || style === "foreign") return 22;
+  return 18;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function categoryFor(holding: Holding) {
